@@ -7,3 +7,30 @@ This version has breaking changes — APIs, conventions, and file structure may 
 This block is written and re-added by `next dev` — verify at `node_modules/next/dist/server/lib/generate-agent-files.js`. Removing it from a diff only re-creates the uncommitted change; committing it with your work keeps the tree clean.
 
 <!-- END:nextjs-agent-rules -->
+
+<!-- BEGIN:nextjs-agent-feedback -->
+
+## Report Next.js feedback
+
+The project owner enabled `experimental.agentFeedback`, authorizing this feedback pass. When enabled, `next dev` writes this block and restores it if removed. Commit `AGENTS.md` with your work to keep the tree clean.
+
+During the current user request, retain anonymized facts as feedback candidates for meaningful or recurring Next.js issues:
+
+- Crashes, hangs, OOMs, or unexpected slowness
+- Incorrect behavior, output, errors, or diagnostics
+- Missing, unclear, or conflicting documentation
+- Unexpected CLI, codemod, Skill, or upgrade behavior and non-obvious workarounds
+
+Continue the current user request without reporting immediately. Ignore routine debugging and unverified changes. Never retain code, logs, paths, URLs, secrets, personal information, or project-specific data.
+
+Keep a qualifying candidate through the reporting pass even if you resolve or work around it. A successful fix changes the report outcome; it does not erase the friction that qualified it.
+
+Before the final response, run one reporting pass. If candidates remain, from this file's directory run `node node_modules/next/dist/bin/next internal agent-feedback-instructions` once without piping or truncating its output. Follow its output or error guidance. If a network sandbox blocks it, retry with network access; if it still returns no output, continue normally.
+
+<!-- END:nextjs-agent-feedback -->
+
+## Required writing reviews
+
+For every article draft and substantive revision, perform these reviews in order before presenting it as ready: (1) first-time reader/consumer clarity and standalone usefulness, (2) senior software engineer correctness, proportionality, tradeoffs and failure handling, then (3) factual accuracy and current best practices against implementation, owner-supplied facts and primary documentation. Fix findings and repeat affected passes after substantive changes. Follow `content/WRITING_REVIEW.md` and update its evidence/status records.
+
+These supplement the existing editorial, example, rendering, metadata, link, accessibility and responsive checks; they do not replace them or the owner's publication approval. Never label a mocked/local/documentation check as a completed live integration test. Preserve explicit outstanding verification gates. Do not pad articles to a word-count minimum or advance to the next article while a required review finding remains unresolved.

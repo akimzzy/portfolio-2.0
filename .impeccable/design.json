@@ -1,0 +1,471 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-16T09:29:20.995867+00:00",
+  "title": "Design System: Akeem Adeyemi Portfolio",
+  "extensions": {
+    "colorMeta": {
+      "link-light": {
+        "role": "primary",
+        "displayName": "Quiet Blue, light",
+        "tonalRamp": [
+          "oklch(15% 0.10931 257.78)",
+          "oklch(26% 0.10931 257.78)",
+          "oklch(38% 0.10931 257.78)",
+          "oklch(49% 0.10931 257.78)",
+          "oklch(61% 0.10931 257.78)",
+          "oklch(72% 0.10931 257.78)",
+          "oklch(84% 0.10931 257.78)",
+          "oklch(95% 0.10931 257.78)"
+        ]
+      },
+      "link-dark": {
+        "role": "primary",
+        "displayName": "Quiet Blue, dark",
+        "tonalRamp": [
+          "oklch(15% 0.06345 264.53)",
+          "oklch(26% 0.06345 264.53)",
+          "oklch(38% 0.06345 264.53)",
+          "oklch(49% 0.06345 264.53)",
+          "oklch(61% 0.06345 264.53)",
+          "oklch(72% 0.06345 264.53)",
+          "oklch(84% 0.06345 264.53)",
+          "oklch(95% 0.06345 264.53)"
+        ]
+      },
+      "page-light": {
+        "role": "neutral",
+        "displayName": "Off-white Paper",
+        "tonalRamp": [
+          "oklch(15% 0.00396 106.47)",
+          "oklch(26% 0.00396 106.47)",
+          "oklch(38% 0.00396 106.47)",
+          "oklch(49% 0.00396 106.47)",
+          "oklch(61% 0.00396 106.47)",
+          "oklch(72% 0.00396 106.47)",
+          "oklch(84% 0.00396 106.47)",
+          "oklch(95% 0.00396 106.47)"
+        ]
+      },
+      "page-dark": {
+        "role": "neutral",
+        "displayName": "Near-black Ground",
+        "tonalRamp": [
+          "oklch(15% 0.00444 128.77)",
+          "oklch(26% 0.00444 128.77)",
+          "oklch(38% 0.00444 128.77)",
+          "oklch(49% 0.00444 128.77)",
+          "oklch(61% 0.00444 128.77)",
+          "oklch(72% 0.00444 128.77)",
+          "oklch(84% 0.00444 128.77)",
+          "oklch(95% 0.00444 128.77)"
+        ]
+      },
+      "dialog-dark": {
+        "role": "neutral",
+        "displayName": "Raised Dark Surface",
+        "tonalRamp": [
+          "oklch(15% 0.00791 118.52)",
+          "oklch(26% 0.00791 118.52)",
+          "oklch(38% 0.00791 118.52)",
+          "oklch(49% 0.00791 118.52)",
+          "oklch(61% 0.00791 118.52)",
+          "oklch(72% 0.00791 118.52)",
+          "oklch(84% 0.00791 118.52)",
+          "oklch(95% 0.00791 118.52)"
+        ]
+      },
+      "ink-light": {
+        "role": "neutral",
+        "displayName": "Warm Ink, light",
+        "tonalRamp": [
+          "oklch(15% 0.01527 129.06)",
+          "oklch(26% 0.01527 129.06)",
+          "oklch(38% 0.01527 129.06)",
+          "oklch(49% 0.01527 129.06)",
+          "oklch(61% 0.01527 129.06)",
+          "oklch(72% 0.01527 129.06)",
+          "oklch(84% 0.01527 129.06)",
+          "oklch(95% 0.01527 129.06)"
+        ]
+      },
+      "ink-dark": {
+        "role": "neutral",
+        "displayName": "Warm Ink, dark",
+        "tonalRamp": [
+          "oklch(15% 0.00804 114.22)",
+          "oklch(26% 0.00804 114.22)",
+          "oklch(38% 0.00804 114.22)",
+          "oklch(49% 0.00804 114.22)",
+          "oklch(61% 0.00804 114.22)",
+          "oklch(72% 0.00804 114.22)",
+          "oklch(84% 0.00804 114.22)",
+          "oklch(95% 0.00804 114.22)"
+        ]
+      },
+      "muted-light": {
+        "role": "neutral",
+        "displayName": "Muted Ink, light",
+        "tonalRamp": [
+          "oklch(15% 0.01650 128.81)",
+          "oklch(26% 0.01650 128.81)",
+          "oklch(38% 0.01650 128.81)",
+          "oklch(49% 0.01650 128.81)",
+          "oklch(61% 0.01650 128.81)",
+          "oklch(72% 0.01650 128.81)",
+          "oklch(84% 0.01650 128.81)",
+          "oklch(95% 0.01650 128.81)"
+        ]
+      },
+      "muted-dark": {
+        "role": "neutral",
+        "displayName": "Muted Ink, dark",
+        "tonalRamp": [
+          "oklch(15% 0.01758 121.88)",
+          "oklch(26% 0.01758 121.88)",
+          "oklch(38% 0.01758 121.88)",
+          "oklch(49% 0.01758 121.88)",
+          "oklch(61% 0.01758 121.88)",
+          "oklch(72% 0.01758 121.88)",
+          "oklch(84% 0.01758 121.88)",
+          "oklch(95% 0.01758 121.88)"
+        ]
+      },
+      "link-light-hover": {
+        "role": "primary",
+        "displayName": "Link Light Hover",
+        "tonalRamp": [
+          "oklch(15% 0.08771 258.18)",
+          "oklch(26% 0.08771 258.18)",
+          "oklch(38% 0.08771 258.18)",
+          "oklch(49% 0.08771 258.18)",
+          "oklch(61% 0.08771 258.18)",
+          "oklch(72% 0.08771 258.18)",
+          "oklch(84% 0.08771 258.18)",
+          "oklch(95% 0.08771 258.18)"
+        ]
+      },
+      "link-dark-hover": {
+        "role": "primary",
+        "displayName": "Link Dark Hover",
+        "tonalRamp": [
+          "oklch(15% 0.04049 263.64)",
+          "oklch(26% 0.04049 263.64)",
+          "oklch(38% 0.04049 263.64)",
+          "oklch(49% 0.04049 263.64)",
+          "oklch(61% 0.04049 263.64)",
+          "oklch(72% 0.04049 263.64)",
+          "oklch(84% 0.04049 263.64)",
+          "oklch(95% 0.04049 263.64)"
+        ]
+      },
+      "focus-light": {
+        "role": "primary",
+        "displayName": "Focus Light",
+        "tonalRamp": [
+          "oklch(15% 0.09558 258.10)",
+          "oklch(26% 0.09558 258.10)",
+          "oklch(38% 0.09558 258.10)",
+          "oklch(49% 0.09558 258.10)",
+          "oklch(61% 0.09558 258.10)",
+          "oklch(72% 0.09558 258.10)",
+          "oklch(84% 0.09558 258.10)",
+          "oklch(95% 0.09558 258.10)"
+        ]
+      },
+      "focus-dark": {
+        "role": "primary",
+        "displayName": "Focus Dark",
+        "tonalRamp": [
+          "oklch(15% 0.05324 261.04)",
+          "oklch(26% 0.05324 261.04)",
+          "oklch(38% 0.05324 261.04)",
+          "oklch(49% 0.05324 261.04)",
+          "oklch(61% 0.05324 261.04)",
+          "oklch(72% 0.05324 261.04)",
+          "oklch(84% 0.05324 261.04)",
+          "oklch(95% 0.05324 261.04)"
+        ]
+      },
+      "selection": {
+        "role": "neutral",
+        "displayName": "Selection",
+        "tonalRamp": [
+          "oklch(15% 0.02018 257.47)",
+          "oklch(26% 0.02018 257.47)",
+          "oklch(38% 0.02018 257.47)",
+          "oklch(49% 0.02018 257.47)",
+          "oklch(61% 0.02018 257.47)",
+          "oklch(72% 0.02018 257.47)",
+          "oklch(84% 0.02018 257.47)",
+          "oklch(95% 0.02018 257.47)"
+        ]
+      },
+      "white": {
+        "role": "neutral",
+        "displayName": "White",
+        "tonalRamp": [
+          "oklch(15% 0.00000 0.00)",
+          "oklch(26% 0.00000 0.00)",
+          "oklch(38% 0.00000 0.00)",
+          "oklch(49% 0.00000 0.00)",
+          "oklch(61% 0.00000 0.00)",
+          "oklch(72% 0.00000 0.00)",
+          "oklch(84% 0.00000 0.00)",
+          "oklch(95% 0.00000 0.00)"
+        ]
+      },
+      "divider-light": {
+        "role": "neutral",
+        "displayName": "Divider Light",
+        "tonalRamp": [
+          "oklch(15% 0.00000 0.00 / 0.07)",
+          "oklch(26% 0.00000 0.00 / 0.07)",
+          "oklch(38% 0.00000 0.00 / 0.07)",
+          "oklch(49% 0.00000 0.00 / 0.07)",
+          "oklch(61% 0.00000 0.00 / 0.07)",
+          "oklch(72% 0.00000 0.00 / 0.07)",
+          "oklch(84% 0.00000 0.00 / 0.07)",
+          "oklch(95% 0.00000 0.00 / 0.07)"
+        ]
+      },
+      "project-divider-light": {
+        "role": "neutral",
+        "displayName": "Project Divider Light",
+        "tonalRamp": [
+          "oklch(15% 0.00000 0.00 / 0.06)",
+          "oklch(26% 0.00000 0.00 / 0.06)",
+          "oklch(38% 0.00000 0.00 / 0.06)",
+          "oklch(49% 0.00000 0.00 / 0.06)",
+          "oklch(61% 0.00000 0.00 / 0.06)",
+          "oklch(72% 0.00000 0.00 / 0.06)",
+          "oklch(84% 0.00000 0.00 / 0.06)",
+          "oklch(95% 0.00000 0.00 / 0.06)"
+        ]
+      },
+      "divider-dark": {
+        "role": "neutral",
+        "displayName": "Divider Dark",
+        "tonalRamp": [
+          "oklch(15% 0.00000 0.00 / 0.07)",
+          "oklch(26% 0.00000 0.00 / 0.07)",
+          "oklch(38% 0.00000 0.00 / 0.07)",
+          "oklch(49% 0.00000 0.00 / 0.07)",
+          "oklch(61% 0.00000 0.00 / 0.07)",
+          "oklch(72% 0.00000 0.00 / 0.07)",
+          "oklch(84% 0.00000 0.00 / 0.07)",
+          "oklch(95% 0.00000 0.00 / 0.07)"
+        ]
+      },
+      "experience-light": {
+        "role": "neutral",
+        "displayName": "Experience Light",
+        "tonalRamp": [
+          "oklch(15% 0.00000 0.00 / 0.025)",
+          "oklch(26% 0.00000 0.00 / 0.025)",
+          "oklch(38% 0.00000 0.00 / 0.025)",
+          "oklch(49% 0.00000 0.00 / 0.025)",
+          "oklch(61% 0.00000 0.00 / 0.025)",
+          "oklch(72% 0.00000 0.00 / 0.025)",
+          "oklch(84% 0.00000 0.00 / 0.025)",
+          "oklch(95% 0.00000 0.00 / 0.025)"
+        ]
+      },
+      "experience-light-hover": {
+        "role": "neutral",
+        "displayName": "Experience Light Hover",
+        "tonalRamp": [
+          "oklch(15% 0.00000 0.00 / 0.05)",
+          "oklch(26% 0.00000 0.00 / 0.05)",
+          "oklch(38% 0.00000 0.00 / 0.05)",
+          "oklch(49% 0.00000 0.00 / 0.05)",
+          "oklch(61% 0.00000 0.00 / 0.05)",
+          "oklch(72% 0.00000 0.00 / 0.05)",
+          "oklch(84% 0.00000 0.00 / 0.05)",
+          "oklch(95% 0.00000 0.00 / 0.05)"
+        ]
+      },
+      "experience-dark": {
+        "role": "neutral",
+        "displayName": "Experience Dark",
+        "tonalRamp": [
+          "oklch(15% 0.00000 0.00 / 0.035)",
+          "oklch(26% 0.00000 0.00 / 0.035)",
+          "oklch(38% 0.00000 0.00 / 0.035)",
+          "oklch(49% 0.00000 0.00 / 0.035)",
+          "oklch(61% 0.00000 0.00 / 0.035)",
+          "oklch(72% 0.00000 0.00 / 0.035)",
+          "oklch(84% 0.00000 0.00 / 0.035)",
+          "oklch(95% 0.00000 0.00 / 0.035)"
+        ]
+      },
+      "experience-dark-hover": {
+        "role": "neutral",
+        "displayName": "Experience Dark Hover",
+        "tonalRamp": [
+          "oklch(15% 0.00000 0.00 / 0.065)",
+          "oklch(26% 0.00000 0.00 / 0.065)",
+          "oklch(38% 0.00000 0.00 / 0.065)",
+          "oklch(49% 0.00000 0.00 / 0.065)",
+          "oklch(61% 0.00000 0.00 / 0.065)",
+          "oklch(72% 0.00000 0.00 / 0.065)",
+          "oklch(84% 0.00000 0.00 / 0.065)",
+          "oklch(95% 0.00000 0.00 / 0.065)"
+        ]
+      },
+      "control-dark-hover": {
+        "role": "neutral",
+        "displayName": "Control Dark Hover",
+        "tonalRamp": [
+          "oklch(15% 0.00000 0.00 / 0.05)",
+          "oklch(26% 0.00000 0.00 / 0.05)",
+          "oklch(38% 0.00000 0.00 / 0.05)",
+          "oklch(49% 0.00000 0.00 / 0.05)",
+          "oklch(61% 0.00000 0.00 / 0.05)",
+          "oklch(72% 0.00000 0.00 / 0.05)",
+          "oklch(84% 0.00000 0.00 / 0.05)",
+          "oklch(95% 0.00000 0.00 / 0.05)"
+        ]
+      },
+      "backdrop": {
+        "role": "neutral",
+        "displayName": "Backdrop",
+        "tonalRamp": [
+          "oklch(15% 0.00000 0.00 / 0.5)",
+          "oklch(26% 0.00000 0.00 / 0.5)",
+          "oklch(38% 0.00000 0.00 / 0.5)",
+          "oklch(49% 0.00000 0.00 / 0.5)",
+          "oklch(61% 0.00000 0.00 / 0.5)",
+          "oklch(72% 0.00000 0.00 / 0.5)",
+          "oklch(84% 0.00000 0.00 / 0.5)",
+          "oklch(95% 0.00000 0.00 / 0.5)"
+        ]
+      }
+    },
+    "typographyMeta": {
+      "title": {
+        "displayName": "Small owner / dialog heading",
+        "purpose": "Owner name and detail title; no oversized display."
+      },
+      "wordmark": {
+        "displayName": "Cabinet Grotesk wordmark",
+        "purpose": "Lowercase home anchor in the header."
+      }
+    },
+    "shadows": [
+      {
+        "name": "dialog-xl",
+        "value": "0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1)",
+        "purpose": "Native detail dialog only; Tailwind shadow-xl."
+      }
+    ],
+    "motion": [
+      {
+        "name": "color-transition-duration",
+        "value": "150ms",
+        "purpose": "Existing transition-colors utilities."
+      },
+      {
+        "name": "color-transition-ease",
+        "value": "cubic-bezier(0.4, 0, 0.2, 1)",
+        "purpose": "Tailwind default transition timing."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "sm",
+        "value": "40rem"
+      }
+    ],
+    "previewNotes": "Color ramps are synthesized OKLCH preview strips, not implemented palette tokens. Component samples translate existing source to static HTML/CSS; they do not implement React state or modal lifecycle. The dialog preview is open inline to avoid taking over the panel. Source values and manual/system theme behavior remain authoritative in app/portfolio.tsx, app/layout.tsx and app/globals.css."
+  },
+  "components": [
+    {
+      "name": "Text link",
+      "kind": "custom",
+      "refersTo": "text-link",
+      "description": "Blue text action with a revealed hover underline and visible focus. Example destination is a real in-page section.",
+      "html": "<div class=\"ds-preview\"><a class=\"ds-text-link ds-link ds-focus\" href=\"#projects\">Projects</a></div>",
+      "css": ".ds-preview{font-family:var(--font-portfolio-sans),sans-serif;color:#292d25}.ds-muted{color:#686d63}.ds-focus:focus-visible{outline:2px solid #5277ae;outline-offset:4px}.ds-link{color:#355f9c;text-decoration:underline;text-decoration-color:transparent;text-underline-offset:4px;transition:color 150ms cubic-bezier(.4,0,.2,1),text-decoration-color 150ms cubic-bezier(.4,0,.2,1)}.ds-link:hover{color:#203f6d;text-decoration-color:currentColor}.ds-text-link{display:inline-flex;min-height:44px;align-items:center;border-radius:4px;font-size:14px;line-height:20px}:host-context(html[data-theme=\"dark\"]) .ds-preview{color:#edeee8}:host-context(html[data-theme=\"dark\"]) .ds-muted{color:#a4a89c}:host-context(html[data-theme=\"dark\"]) .ds-focus:focus-visible{outline-color:#a9bddf}:host-context(html[data-theme=\"dark\"]) .ds-link{color:#9aaed7}:host-context(html[data-theme=\"dark\"]) .ds-link:hover{color:#c5d3ee}@media(prefers-color-scheme:dark){:host-context(html:not([data-theme=\"light\"])) .ds-preview{color:#edeee8}:host-context(html:not([data-theme=\"light\"])) .ds-muted{color:#a4a89c}:host-context(html:not([data-theme=\"light\"])) .ds-focus:focus-visible{outline-color:#a9bddf}:host-context(html:not([data-theme=\"light\"])) .ds-link{color:#9aaed7}:host-context(html:not([data-theme=\"light\"])) .ds-link:hover{color:#c5d3ee}}"
+    },
+    {
+      "name": "Header navigation",
+      "kind": "nav",
+      "refersTo": "navigation",
+      "description": "Muted anchors wrap into the second header row on small screens.",
+      "html": "<nav class=\"ds-preview ds-nav\" aria-label=\"Main navigation\"><a class=\"ds-muted ds-focus\" href=\"#projects\">Projects</a><a class=\"ds-muted ds-focus\" href=\"#experience\">Experience</a><a class=\"ds-muted ds-focus\" href=\"#about\">About</a></nav>",
+      "css": ".ds-preview{font-family:var(--font-portfolio-sans),sans-serif;color:#292d25}.ds-muted{color:#686d63}.ds-focus:focus-visible{outline:2px solid #5277ae;outline-offset:4px}.ds-link{color:#355f9c;text-decoration:underline;text-decoration-color:transparent;text-underline-offset:4px;transition:color 150ms cubic-bezier(.4,0,.2,1),text-decoration-color 150ms cubic-bezier(.4,0,.2,1)}.ds-link:hover{color:#203f6d;text-decoration-color:currentColor}.ds-nav{display:flex;gap:24px;font-size:14px;line-height:20px}.ds-nav a{display:inline-flex;min-height:44px;align-items:center;border-radius:4px;text-decoration:none;transition:color 150ms cubic-bezier(.4,0,.2,1)}.ds-nav a:hover{color:#292d25}@media(min-width:40rem){.ds-nav{gap:20px;justify-content:flex-end}}:host-context(html[data-theme=\"dark\"]) .ds-preview{color:#edeee8}:host-context(html[data-theme=\"dark\"]) .ds-muted{color:#a4a89c}:host-context(html[data-theme=\"dark\"]) .ds-focus:focus-visible{outline-color:#a9bddf}:host-context(html[data-theme=\"dark\"]) .ds-link{color:#9aaed7}:host-context(html[data-theme=\"dark\"]) .ds-link:hover{color:#c5d3ee}:host-context(html[data-theme=\"dark\"]) .ds-nav a:hover{color:#edeee8}@media(prefers-color-scheme:dark){:host-context(html:not([data-theme=\"light\"])) .ds-preview{color:#edeee8}:host-context(html:not([data-theme=\"light\"])) .ds-muted{color:#a4a89c}:host-context(html:not([data-theme=\"light\"])) .ds-focus:focus-visible{outline-color:#a9bddf}:host-context(html:not([data-theme=\"light\"])) .ds-link{color:#9aaed7}:host-context(html:not([data-theme=\"light\"])) .ds-link:hover{color:#c5d3ee}:host-context(html:not([data-theme=\"light\"])) .ds-nav a:hover{color:#edeee8}}"
+    },
+    {
+      "name": "Theme control",
+      "kind": "button",
+      "refersTo": "theme-control",
+      "description": "Visual sample of the system/light/dark cycling control; live state is implemented in React.",
+      "html": "<div class=\"ds-preview\"><button class=\"ds-theme ds-muted ds-focus\" aria-label=\"Theme: system. Switch to light theme\"><svg aria-hidden=\"true\" width=\"16\" height=\"16\" viewBox=\"0 0 20 20\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.3\"><circle cx=\"10\" cy=\"10\" r=\"6\"/><path d=\"M10 4a6 6 0 0 1 0 12Z\" fill=\"currentColor\"/></svg></button></div>",
+      "css": ".ds-preview{font-family:var(--font-portfolio-sans),sans-serif;color:#292d25}.ds-muted{color:#686d63}.ds-focus:focus-visible{outline:2px solid #5277ae;outline-offset:4px}.ds-link{color:#355f9c;text-decoration:underline;text-decoration-color:transparent;text-underline-offset:4px;transition:color 150ms cubic-bezier(.4,0,.2,1),text-decoration-color 150ms cubic-bezier(.4,0,.2,1)}.ds-link:hover{color:#203f6d;text-decoration-color:currentColor}.ds-theme{display:flex;width:44px;height:44px;align-items:center;justify-content:center;border:0;border-radius:3.40282e+38px;background:transparent;touch-action:manipulation;transition:background-color 150ms cubic-bezier(.4,0,.2,1)}.ds-theme:hover{background:rgb(0 0 0 / .05)}:host-context(html[data-theme=\"dark\"]) .ds-preview{color:#edeee8}:host-context(html[data-theme=\"dark\"]) .ds-muted{color:#a4a89c}:host-context(html[data-theme=\"dark\"]) .ds-focus:focus-visible{outline-color:#a9bddf}:host-context(html[data-theme=\"dark\"]) .ds-link{color:#9aaed7}:host-context(html[data-theme=\"dark\"]) .ds-link:hover{color:#c5d3ee}:host-context(html[data-theme=\"dark\"]) .ds-theme:hover{background:rgb(255 255 255 / .05)}@media(prefers-color-scheme:dark){:host-context(html:not([data-theme=\"light\"])) .ds-preview{color:#edeee8}:host-context(html:not([data-theme=\"light\"])) .ds-muted{color:#a4a89c}:host-context(html:not([data-theme=\"light\"])) .ds-focus:focus-visible{outline-color:#a9bddf}:host-context(html:not([data-theme=\"light\"])) .ds-link{color:#9aaed7}:host-context(html:not([data-theme=\"light\"])) .ds-link:hover{color:#c5d3ee}:host-context(html:not([data-theme=\"light\"])) .ds-theme:hover{background:rgb(255 255 255 / .05)}}"
+    },
+    {
+      "name": "Project row",
+      "kind": "custom",
+      "refersTo": "project-row",
+      "description": "A plain project summary row using verified QuikCity content.",
+      "html": "<article class=\"ds-preview ds-project\"><button class=\"ds-project-title ds-link ds-focus\" type=\"button\" aria-label=\"View QuikCity project details\">QuikCity<svg aria-hidden=\"true\" width=\"14\" height=\"14\" viewBox=\"0 0 20 20\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.4\"><path d=\"M4 10h12m-5-5 5 5-5 5\"/></svg></button><p class=\"ds-summary\">A WhatsApp-first platform for ordering food and requesting courier services, without downloading a separate app.</p><p class=\"ds-tags ds-muted\">WhatsApp commerce · Payments · Monnify · Logistics</p></article>",
+      "css": ".ds-preview{font-family:var(--font-portfolio-sans),sans-serif;color:#292d25}.ds-muted{color:#686d63}.ds-focus:focus-visible{outline:2px solid #5277ae;outline-offset:4px}.ds-link{color:#355f9c;text-decoration:underline;text-decoration-color:transparent;text-underline-offset:4px;transition:color 150ms cubic-bezier(.4,0,.2,1),text-decoration-color 150ms cubic-bezier(.4,0,.2,1)}.ds-link:hover{color:#203f6d;text-decoration-color:currentColor}.ds-project{padding:16px 0;border-bottom:1px solid rgb(0 0 0 / .06)}.ds-project-title{display:inline-flex;min-height:44px;max-width:100%;align-items:center;gap:8px;text-align:left;font:500 16px/24px var(--font-portfolio-sans),sans-serif;border:0;border-radius:4px;background:transparent;padding:0;touch-action:manipulation}.ds-summary{margin:0;font-size:15px;line-height:28px}.ds-tags{margin:6px 0 0;font-size:12px;line-height:24px}:host-context(html[data-theme=\"dark\"]) .ds-preview{color:#edeee8}:host-context(html[data-theme=\"dark\"]) .ds-muted{color:#a4a89c}:host-context(html[data-theme=\"dark\"]) .ds-focus:focus-visible{outline-color:#a9bddf}:host-context(html[data-theme=\"dark\"]) .ds-link{color:#9aaed7}:host-context(html[data-theme=\"dark\"]) .ds-link:hover{color:#c5d3ee}:host-context(html[data-theme=\"dark\"]) .ds-project{border-color:rgb(255 255 255 / .07)}@media(prefers-color-scheme:dark){:host-context(html:not([data-theme=\"light\"])) .ds-preview{color:#edeee8}:host-context(html:not([data-theme=\"light\"])) .ds-muted{color:#a4a89c}:host-context(html:not([data-theme=\"light\"])) .ds-focus:focus-visible{outline-color:#a9bddf}:host-context(html:not([data-theme=\"light\"])) .ds-link{color:#9aaed7}:host-context(html:not([data-theme=\"light\"])) .ds-link:hover{color:#c5d3ee}:host-context(html:not([data-theme=\"light\"])) .ds-project{border-color:rgb(255 255 255 / .07)}}"
+    },
+    {
+      "name": "Experience entry",
+      "kind": "card",
+      "refersTo": "experience-entry",
+      "description": "A whole-row detail trigger with quiet tonal fill, using the confirmed Adventlabs role.",
+      "html": "<button class=\"ds-preview ds-experience ds-focus\" type=\"button\" aria-label=\"View Adventlabs experience details\"><span class=\"ds-entry-head\"><span class=\"ds-entry-title\">Adventlabs</span><span class=\"ds-date ds-muted\">Feb 2026 – Aug 2026</span></span><span class=\"ds-subtitle ds-muted\">Full-stack developer · Remote</span><span class=\"ds-entry-summary ds-muted\">Built subscription and billing workflows for Buzthrive, a multi-tenant inventory management platform.</span></button>",
+      "css": ".ds-preview{font-family:var(--font-portfolio-sans),sans-serif;color:#292d25}.ds-muted{color:#686d63}.ds-focus:focus-visible{outline:2px solid #5277ae;outline-offset:4px}.ds-link{color:#355f9c;text-decoration:underline;text-decoration-color:transparent;text-underline-offset:4px;transition:color 150ms cubic-bezier(.4,0,.2,1),text-decoration-color 150ms cubic-bezier(.4,0,.2,1)}.ds-link:hover{color:#203f6d;text-decoration-color:currentColor}.ds-experience{display:block;width:100%;padding:16px;text-align:left;border:0;border-radius:8px;background:rgb(0 0 0 / .025);touch-action:manipulation;transition:background-color 150ms cubic-bezier(.4,0,.2,1)}.ds-experience:hover{background:rgb(0 0 0 / .05)}.ds-entry-head{display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;column-gap:16px;row-gap:4px}.ds-entry-title{font-size:16px;font-weight:500;line-height:24px}.ds-date{font-size:12px;line-height:16px;font-variant-numeric:tabular-nums}.ds-subtitle{display:block;margin-top:4px;font-size:14px;line-height:20px}.ds-entry-summary{display:block;margin-top:12px;font-size:14px;line-height:24px}@media(min-width:40rem){.ds-experience{padding:20px}}:host-context(html[data-theme=\"dark\"]) .ds-preview{color:#edeee8}:host-context(html[data-theme=\"dark\"]) .ds-muted{color:#a4a89c}:host-context(html[data-theme=\"dark\"]) .ds-focus:focus-visible{outline-color:#a9bddf}:host-context(html[data-theme=\"dark\"]) .ds-link{color:#9aaed7}:host-context(html[data-theme=\"dark\"]) .ds-link:hover{color:#c5d3ee}:host-context(html[data-theme=\"dark\"]) .ds-experience{background:rgb(255 255 255 / .035)}:host-context(html[data-theme=\"dark\"]) .ds-experience:hover{background:rgb(255 255 255 / .065)}@media(prefers-color-scheme:dark){:host-context(html:not([data-theme=\"light\"])) .ds-preview{color:#edeee8}:host-context(html:not([data-theme=\"light\"])) .ds-muted{color:#a4a89c}:host-context(html:not([data-theme=\"light\"])) .ds-focus:focus-visible{outline-color:#a9bddf}:host-context(html:not([data-theme=\"light\"])) .ds-link{color:#9aaed7}:host-context(html:not([data-theme=\"light\"])) .ds-link:hover{color:#c5d3ee}:host-context(html:not([data-theme=\"light\"])) .ds-experience{background:rgb(255 255 255 / .035)}:host-context(html:not([data-theme=\"light\"])) .ds-experience:hover{background:rgb(255 255 255 / .065)}}"
+    },
+    {
+      "name": "Detail dialog",
+      "kind": "custom",
+      "refersTo": "detail-dialog",
+      "description": "Static open native-dialog preview. The live application uses showModal, focus restoration, Escape/backdrop dismissal, and scroll locking.",
+      "html": "<dialog open class=\"ds-preview ds-dialog\" aria-labelledby=\"ds-dialog-title\"><div class=\"ds-dialog-head\"><div><h2 id=\"ds-dialog-title\">QuikCity</h2><p class=\"ds-dialog-sub ds-muted\">Founder & product lead</p></div><form method=\"dialog\"><button class=\"ds-close ds-focus\" aria-label=\"Close details\"><svg aria-hidden=\"true\" width=\"20\" height=\"20\" viewBox=\"0 0 20 20\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.4\"><path d=\"m5 5 10 10M15 5 5 15\"/></svg></button></form></div><p class=\"ds-dialog-summary\">A WhatsApp-first platform for ordering food and requesting courier services, without downloading a separate app.</p><p class=\"ds-dialog-description ds-muted\">I conceived, designed, and built QuikCity independently from concept to production. The platform connects customers, vendors, riders, payments, and logistics in one commerce workflow.</p></dialog>",
+      "css": ".ds-preview{font-family:var(--font-portfolio-sans),sans-serif;color:#292d25}.ds-muted{color:#686d63}.ds-focus:focus-visible{outline:2px solid #5277ae;outline-offset:4px}.ds-link{color:#355f9c;text-decoration:underline;text-decoration-color:transparent;text-underline-offset:4px;transition:color 150ms cubic-bezier(.4,0,.2,1),text-decoration-color 150ms cubic-bezier(.4,0,.2,1)}.ds-link:hover{color:#203f6d;text-decoration-color:currentColor}.ds-dialog{position:relative;margin:auto;max-height:85svh;width:calc(100% - 2rem);max-width:640px;overflow-y:auto;overscroll-behavior:contain;border:0;border-radius:12px;background:#f8f8f5;padding:24px;box-shadow:0 20px 25px -5px rgb(0 0 0 / .1),0 8px 10px -6px rgb(0 0 0 / .1)}.ds-dialog::backdrop{background:rgb(0 0 0 / .5)}.ds-dialog-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px}.ds-dialog h2{margin:0;font-size:24px;line-height:32px;font-weight:600;letter-spacing:-.025em;overflow-wrap:break-word}.ds-dialog-sub{margin:8px 0 0;font-size:14px;line-height:24px}.ds-close{display:flex;width:44px;height:44px;align-items:center;justify-content:center;border:0;border-radius:3.40282e+38px;background:transparent;color:inherit;touch-action:manipulation}.ds-close:hover{background:rgb(0 0 0 / .05)}.ds-dialog-summary{margin:24px 0 0;font-size:16px;line-height:28px}.ds-dialog-description{margin:16px 0 0;font-size:14px;line-height:28px}@media(min-width:40rem){.ds-dialog{padding:32px}}:host-context(html[data-theme=\"dark\"]) .ds-preview{color:#edeee8}:host-context(html[data-theme=\"dark\"]) .ds-muted{color:#a4a89c}:host-context(html[data-theme=\"dark\"]) .ds-focus:focus-visible{outline-color:#a9bddf}:host-context(html[data-theme=\"dark\"]) .ds-link{color:#9aaed7}:host-context(html[data-theme=\"dark\"]) .ds-link:hover{color:#c5d3ee}:host-context(html[data-theme=\"dark\"]) .ds-dialog{background:#161713}:host-context(html[data-theme=\"dark\"]) .ds-close:hover{background:rgb(255 255 255 / .05)}@media(prefers-color-scheme:dark){:host-context(html:not([data-theme=\"light\"])) .ds-preview{color:#edeee8}:host-context(html:not([data-theme=\"light\"])) .ds-muted{color:#a4a89c}:host-context(html:not([data-theme=\"light\"])) .ds-focus:focus-visible{outline-color:#a9bddf}:host-context(html:not([data-theme=\"light\"])) .ds-link{color:#9aaed7}:host-context(html:not([data-theme=\"light\"])) .ds-link:hover{color:#c5d3ee}:host-context(html:not([data-theme=\"light\"])) .ds-dialog{background:#161713}:host-context(html:not([data-theme=\"light\"])) .ds-close:hover{background:rgb(255 255 255 / .05)}}"
+    }
+  ],
+  "narrative": {
+    "northStar": "A readable personal engineering page",
+    "overview": "A restrained, text-first portfolio for Akeem Adeyemi. Small headings, a narrow reading column, quiet blue links, and native vertical flow let visitors explore engineering work at their own pace. The surface follows system light or dark preference, with a manual theme switch.\n\nThe owner selected https://limistah.dev/ as visual inspiration and confirmed its vertical layout. This provenance applies to composition and visual character, not the reference owner’s identity, biography, credentials, content, or portrait. Professional content comes from four owner-supplied resumes and the previous portfolio, as recorded in CONTENT_SOURCES.md. No portrait or project screenshots are currently supplied.",
+    "keyCharacteristics": [
+      "A small owner heading and generous section spacing.",
+      "A centered reading column with simple project rows and softly filled experience entries.",
+      "Off-white and near-black surfaces with quiet blue links.",
+      "Predictable anchors, visible keyboard focus, and native detail dialogs."
+    ],
+    "rules": [
+      {
+        "name": "The Quiet Accent Rule",
+        "body": "Reserve blue for links, project detail triggers, and keyboard focus; experience containers remain neutral.",
+        "section": "colors"
+      },
+      {
+        "name": "The Small Name Rule",
+        "body": "Keep the owner heading at the existing title scale; spacing and the introduction establish the hierarchy.",
+        "section": "typography"
+      },
+      {
+        "name": "The Flat Reading Rule",
+        "body": "Use tonal fills and spacing for ordinary content; reserve raised depth for the dialog.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "Do preserve the narrow vertical reading flow and compact name heading.",
+      "Do use muted text for metadata and blue for actionable project titles and links.",
+      "Do retain visible keyboard focus and generous touch targets.",
+      "Do follow system theme by default and honor an explicit manual choice.",
+      "Do keep professional claims traceable to the owner's supplied material."
+    ],
+    "donts": [
+      "Don’t introduce a large hero, decorative numbering, or a default screenshot card gallery.",
+      "Don’t turn experience hover into a takeover; activation opens details.",
+      "Don’t invent a portrait, work history, credentials, screenshots, or working URLs.",
+      "Don’t import the reference owner’s identity or content."
+    ]
+  }
+}

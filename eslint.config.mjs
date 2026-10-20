@@ -12,6 +12,8 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Installed design skills include third-party browser tooling.
+    ".agents/skills/**",
   ]),
 ]);
 
