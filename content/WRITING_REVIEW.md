@@ -33,6 +33,10 @@ Audience: software engineers with basic application-development knowledge. Focus
 | Building QuikCity: local food ordering through WhatsApp | Pass | Pass for case-study scope | Pass against owner-supplied facts | Standalone product story grounded in the new account and confirmed portfolio facts. Distinguished rider-readiness target from delivery performance; removed demographic/general market claims and unsupplied recollections. No API, automated dispatch, settlement timing or measured conversion claims. Approved and published on 19 October 2026. |
 | Migrating production data safely: validation, cutover, and rollback | Pass | Pass for planning-guide scope | Pass for documented claims | General migration guidance uses Flutterwave-to-Paystack as the worked example. Checked preserved access, mapping, backfill/concurrent changes, scheduler handover, stable attempts, validation gates and post-cutover recovery. No live migration or restore claimed; approved and published on 19 October 2026. |
 
+### QuikCity customer links — 20 October 2026
+
+Reader pass: added direct paths from the case study to the customer ordering site and WhatsApp, so readers can try the two customer entry points described in the article. Engineering pass: these links document product entry points only and make no new claims about payment, dispatch, or fulfilment guarantees. Factual pass: checked the site's **Buy food** flow and its ordering contact against the public QuikCity site and project link constants; kept the customer ordering number (+234 704 850 5626) distinct from the site's support number. No other article claims changed.
+
 ## Pre-deployment review — 19 October 2026
 
 Reconciled the full public set against `content/posts/`: all eleven articles are approved and marked published in the application; there are no remaining article drafts. The reader, senior-engineering, and factual/best-practices results above and in the later QuikCity/migration entries remain the content review record. This does not claim that every external provider or production integration described was exercised; each article's evidence limits are stated above.

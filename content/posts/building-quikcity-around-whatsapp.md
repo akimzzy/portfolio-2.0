@@ -45,7 +45,7 @@ The hardest part was getting that service to work between people who did not yet
 
 A separate customer app would add another step before someone could order: finding it, downloading it, and deciding whether to keep it. WhatsApp offered an entry point that was already familiar to the customers and local businesses I wanted to reach.
 
-Someone with QuikCity's WhatsApp contact could initiate an order without installing a dedicated food-delivery app. The website remained another way to order; customers were not restricted to a conversation.
+Customers can start from the [QuikCity customer site](https://quikcity.co/); its **Buy food** action continues the order in WhatsApp. They can also [order directly on WhatsApp](https://wa.me/2347048505626?text=Hi%20QuikCity) at **+234 704 850 5626**, without installing a dedicated food-delivery app.
 
 That did not mean every part of the product belonged inside WhatsApp. QuikCity also needed vendor operations, payments, and delivery coordination. I built the [vendor web app](https://app.quikcity.co/) alongside the customer-facing service.
 

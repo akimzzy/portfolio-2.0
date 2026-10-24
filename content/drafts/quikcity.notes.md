@@ -48,3 +48,7 @@ Reader pass: clear opening, locally explained product surfaces, illustrative exa
 ## Owner approval — 19 October 2026
 
 Approved after the screenshot and final review pass; article moved to ../posts/building-quikcity-around-whatsapp.md with its publication date. Historical private-draft notes above describe the earlier review state.
+
+## Customer-link update — 20 October 2026
+
+Added the customer site and direct customer-order WhatsApp link to the published case study. Verified that the live site's **Buy food** action and FAQ/footer point to the same ordering number, +234 704 850 5626. The separate +234 814 811 0894 number is support, so it is not used as the order link. Re-read the paragraph for clarity and checked that the new links do not imply a delivery-time or payment guarantee.

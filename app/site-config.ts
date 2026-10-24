@@ -4,7 +4,7 @@ function resolveSiteUrl() {
   if (!configuredUrl) return undefined;
   const url = new URL(configuredUrl);
   if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.pathname !== '/' || url.search || url.hash) {
-    throw new Error('SITE_URL must be the public site origin, for example https://portfolio.example');
+    throw new Error('SITE_URL must be the public site origin, for example https://ake-em.com');
   }
   return url;
 }
