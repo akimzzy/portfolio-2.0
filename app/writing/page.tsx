@@ -7,18 +7,18 @@ import { ArticleList } from "./article-list";
 import { estimateReadingMinutes } from "./reading-time";
 
 export const metadata: Metadata = {
-  title: "Writing",
-  description: "Notes on the things I build, the problems I run into, and what I learn along the way.",
+  title: "Articles",
+  description: "Articles about the products I build, engineering problems I work through, and what I learn along the way.",
   alternates: siteUrl ? { canonical: "/writing" } : undefined,
-  openGraph: { title: "Writing | Akeem Adeyemi", description: "Notes on software I’ve built, problems I’ve worked through, and what I learned.", type: "website" },
-  twitter: { title: "Writing | Akeem Adeyemi", description: "Notes on software I’ve built, problems I’ve worked through, and what I learned." },
+  openGraph: { title: "Articles | Akeem Adeyemi", description: "Articles about software I’ve built, engineering problems I’ve worked through, and what I learned.", type: "website" },
+  twitter: { title: "Articles | Akeem Adeyemi", description: "Articles about software I’ve built, engineering problems I’ve worked through, and what I learned." },
 };
 
 export default function WritingPage() {
   const posts = getPublishedPosts();
   return <>
-    <h1 className="text-[22px] font-semibold leading-7 tracking-[-0.01em]">Writing</h1>
-    <p className="mt-3 text-[13px] leading-6 text-[#686d63] dark:text-[#a4a89c]">Notes on the things I build, the problems I run into, and what I learn along the way.</p>
+    <h1 className="text-[22px] font-semibold leading-7 tracking-[-0.01em]">Articles</h1>
+    <p className="mt-3 text-[13px] leading-6 text-[#686d63] dark:text-[#a4a89c]">Practical articles about software I build, engineering problems I work through, and what I learn along the way.</p>
     {posts.length ? <ArticleList posts={posts.map(post => ({
       slug: post.slug,
       title: post.title,

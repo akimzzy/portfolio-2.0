@@ -6,10 +6,10 @@ import { profile } from "./portfolio-data";
 
 const muted = "text-[#686d63] dark:text-[#a4a89c]";
 const focus = "focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#5277ae] dark:focus-visible:outline-[#a9bddf]";
-const sections = [["About", "about"], ["Experience", "experience"], ["Skills", "skills"], ["Projects", "projects"]] as const;
+const sections = [["Me", "about"], ["Career", "experience"], ["Skills", "skills"], ["Works", "projects"]] as const;
 
 function navigationLinkClass(active: boolean) {
-  return `relative inline-flex min-h-10 touch-manipulation items-center rounded-md px-1.5 text-xs leading-5 transition-[background-color,color] duration-200 after:absolute after:bottom-1 after:left-1/2 after:h-1 after:w-1 after:-translate-x-1/2 after:rounded-full after:bg-current after:content-[''] sm:px-2 sm:text-[13px] ${active ? "bg-[#355f9c]/[0.09] font-medium text-[#294d7e] after:opacity-100 dark:bg-[#9aaed7]/[0.12] dark:text-[#c5d3ee]" : `${muted} after:opacity-0 hover:bg-black/[0.045] hover:text-[#292d25] dark:hover:bg-white/[0.06] dark:hover:text-[#edeee8]`} ${focus}`;
+  return `relative inline-flex min-h-10 touch-manipulation items-center rounded-md px-1.5 text-xs leading-5 transition-[background-color,color] duration-200 after:absolute after:bottom-1 after:left-1.5 after:right-1.5 after:h-1 after:bg-[radial-gradient(circle_at_center,currentColor_2px,transparent_2.25px)] after:bg-[length:6px_4px] after:bg-[position:center] after:content-[''] sm:px-2 sm:text-[13px] sm:after:left-2 sm:after:right-2 ${active ? "font-medium text-[#294d7e] after:opacity-100 dark:text-[#c5d3ee]" : `${muted} after:opacity-0 hover:bg-black/[0.045] hover:text-[#292d25] dark:hover:bg-white/[0.06] dark:hover:text-[#edeee8]`} ${focus}`;
 }
 
 function ThemeSwitch() {
@@ -139,7 +139,7 @@ export function SiteHeader({ section = "home" }: { section?: "home" | "writing" 
             if (!home || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
             navigationTarget.current = "writing";
             setActiveSection("writing");
-          }} aria-current={home && activeSection === "writing" ? "location" : !home && section === "writing" ? "page" : undefined} className={navigationLinkClass(home && activeSection === "writing" || !home && section === "writing")}>Writing</Link>
+          }} aria-current={home && activeSection === "writing" ? "location" : !home && section === "writing" ? "page" : undefined} className={navigationLinkClass(home && activeSection === "writing" || !home && section === "writing")}>Articles</Link>
         </nav>
         <div className="col-start-2 row-start-1 sm:col-start-2"><ThemeSwitch /></div>
       </div>

@@ -89,7 +89,7 @@ export default function Portfolio({ articles, articleCount }: { articles: Homepa
       <SiteHeader />
 
       <main id="content" tabIndex={-1} className="mx-auto max-w-[688px] scroll-mt-[calc(var(--portfolio-header-height,9.5rem)+1.5rem)] px-6 pb-12 pt-10 sm:pt-12">
-        <section id="about" aria-labelledby="intro-heading" className="scroll-mt-[calc(var(--portfolio-header-height,9.5rem)+1.5rem)]">
+        <section id="about" aria-label="Me" className="scroll-mt-[calc(var(--portfolio-header-height,9.5rem)+1.5rem)]">
           <h1 id="intro-heading" className="text-balance text-[22px] font-semibold leading-7 tracking-[-0.01em]">{profile.name}</h1>
           <p className={`mt-1 text-[13px] leading-5 ${metadataTone}`}>{profile.role}</p>
           <p className="mt-6 text-[13px] font-semibold leading-6">{profile.intro}</p>
@@ -104,12 +104,12 @@ export default function Portfolio({ articles, articleCount }: { articles: Homepa
 
         <section id="experience" aria-labelledby="experience-heading" className="mt-12 scroll-mt-[calc(var(--portfolio-header-height,9.5rem)+1.5rem)]">
           <div className="mb-3 flex items-center justify-between gap-4">
-            <h2 id="experience-heading" className={`text-[13px] font-semibold uppercase leading-4 tracking-[0.06em] ${metadataTone}`}>Experience</h2>
+            <h2 id="experience-heading" className={`text-[13px] font-semibold uppercase leading-4 tracking-[0.06em] ${metadataTone}`}>Career</h2>
           </div>
           <ul className="space-y-2">
             {experience.map(role => (
               <li key={role.id}>
-                <button onClick={() => setDetail(role)} aria-haspopup="dialog" aria-controls="portfolio-detail" aria-label={`View ${role.title} experience details`} className={`block w-full cursor-pointer touch-manipulation rounded-lg bg-black/[0.025] p-3 text-left transition-colors hover:bg-black/[0.05] sm:p-4 dark:bg-white/[0.035] dark:hover:bg-white/[0.065] ${focus}`}>
+                  <button onClick={() => setDetail(role)} aria-haspopup="dialog" aria-controls="portfolio-detail" aria-label={`View ${role.title} career details`} className={`block w-full cursor-pointer touch-manipulation rounded-lg bg-black/[0.025] p-3 text-left transition-colors hover:bg-black/[0.05] sm:p-4 dark:bg-white/[0.035] dark:hover:bg-white/[0.065] ${focus}`}>
                   <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
                     <h3 className="text-base font-medium">{role.title}</h3>
                     <span className={`text-xs tabular-nums ${metadataTone}`}>{role.period}</span>
@@ -120,7 +120,7 @@ export default function Portfolio({ articles, articleCount }: { articles: Homepa
                 </button>
               </li>
             ))}
-            {!experience.length && <li className={`py-6 text-sm ${muted}`}>Experience details will appear here soon.</li>}
+            {!experience.length && <li className={`py-6 text-sm ${muted}`}>Career details will appear here soon.</li>}
           </ul>
         </section>
 
@@ -135,7 +135,7 @@ export default function Portfolio({ articles, articleCount }: { articles: Homepa
         </section>
 
         <section id="projects" aria-labelledby="projects-heading" className="mt-12 scroll-mt-[calc(var(--portfolio-header-height,9.5rem)+1.5rem)]">
-          <h2 id="projects-heading" className={`text-[13px] font-semibold uppercase leading-4 tracking-[0.06em] ${metadataTone}`}>Projects & product work</h2>
+          <h2 id="projects-heading" className={`text-[13px] font-semibold uppercase leading-4 tracking-[0.06em] ${metadataTone}`}>Works</h2>
           <p className={`mt-1 text-[13px] leading-6 ${muted}`}>Products I’ve built myself or worked on as part of a team.</p>
           <ProjectList entries={projects} onOpen={setDetail} />
         </section>
@@ -147,10 +147,10 @@ export default function Portfolio({ articles, articleCount }: { articles: Homepa
 
         {articles.length > 0 && <section id="writing" aria-labelledby="writing-heading" className="mt-12 scroll-mt-[calc(var(--portfolio-header-height,9.5rem)+1.5rem)]">
           <div className="flex items-baseline justify-between gap-4">
-            <h2 id="writing-heading" className={`text-[13px] font-semibold uppercase leading-4 tracking-[0.06em] ${metadataTone}`}>Writing</h2>
+            <h2 id="writing-heading" className={`text-[13px] font-semibold uppercase leading-4 tracking-[0.06em] ${metadataTone}`}>Articles</h2>
             <Link href="/writing" className={`inline-flex min-h-11 items-center rounded text-[13px] ${link} ${focus}`}>View all {articleCount} articles<Arrow /></Link>
           </div>
-          <p className={`mt-1 text-[13px] leading-6 ${muted}`}>Notes on the things I build, the problems I run into, and what I learn along the way.</p>
+          <p className={`mt-1 text-[13px] leading-6 ${muted}`}>Articles about the products I build, engineering problems I work through, and what I learn along the way.</p>
           <ul className="mt-3 space-y-4">
             {articles.map(article => <li key={article.slug}>
               <Link href={`/writing/${article.slug}`} className={`block min-h-11 rounded ${focus}`}>
