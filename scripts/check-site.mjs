@@ -25,8 +25,8 @@ for (const utility of ['.sticky', '.rounded-t-2xl', '.scroll-mt-']) assert.ok(st
 assert.ok(styles.includes('--font-portfolio-sans'), 'The portfolio font must remain connected');
 
 const writing = await (await get('/writing')).text();
-assert.match(writing, /Writing \| Akeem Adeyemi/);
-assert.match(writing, /<title>Writing \| Akeem Adeyemi<\/title>/);
+assert.match(writing, /Articles \| Akeem Adeyemi/);
+assert.match(writing, /<title>Articles \| Akeem Adeyemi<\/title>/);
 assert.match(writing, /Building a Next.js E-commerce App/);
 assert.match(writing, /aria-label="About \d+ minutes? to read"/);
 assert.match(writing, /href="\/writing\/building-nextjs-ecommerce-app"/);
