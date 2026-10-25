@@ -43,6 +43,7 @@ next-env.d.ts
 
 # Ephemeral design-tool evidence and exploration state
 /.impeccable/review/
+/.impeccable/critique/
 /.impeccable/questions/
 /.impeccable/live/
 /.impeccable/hook.cache.json

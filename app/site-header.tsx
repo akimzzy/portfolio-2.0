@@ -6,8 +6,11 @@ import { profile } from "./portfolio-data";
 
 const muted = "text-[#686d63] dark:text-[#a4a89c]";
 const focus = "focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#5277ae] dark:focus-visible:outline-[#a9bddf]";
-const activeLink = "text-[#355f9c] underline decoration-current underline-offset-8 dark:text-[#9aaed7]";
 const sections = [["About", "about"], ["Experience", "experience"], ["Skills", "skills"], ["Projects", "projects"]] as const;
+
+function navigationLinkClass(active: boolean) {
+  return `relative inline-flex min-h-10 touch-manipulation items-center rounded-md px-1.5 text-xs leading-5 transition-[background-color,color] duration-200 after:absolute after:bottom-1 after:left-1/2 after:h-1 after:w-1 after:-translate-x-1/2 after:rounded-full after:bg-current after:content-[''] sm:px-2 sm:text-[13px] ${active ? "bg-[#355f9c]/[0.09] font-medium text-[#294d7e] after:opacity-100 dark:bg-[#9aaed7]/[0.12] dark:text-[#c5d3ee]" : `${muted} after:opacity-0 hover:bg-black/[0.045] hover:text-[#292d25] dark:hover:bg-white/[0.06] dark:hover:text-[#edeee8]`} ${focus}`;
+}
 
 function ThemeSwitch() {
   const [theme, setTheme] = useState("system");
@@ -56,7 +59,9 @@ export function SiteHeader({ section = "home" }: { section?: "home" | "writing" 
   const home = section === "home";
   const header = useRef<HTMLElement>(null);
   const navigationTarget = useRef<string | undefined>(undefined);
-  const [activeSection, setActiveSection] = useState<string>();
+  const [activeSection, setActiveSection] = useState<string | undefined>(home ? "about" : undefined);
+  const [showHeaderName, setShowHeaderName] = useState(false);
+  const headerNameVisible = home && showHeaderName;
 
   useEffect(() => {
     const element = header.current;
@@ -65,14 +70,18 @@ export function SiteHeader({ section = "home" }: { section?: "home" | "writing" 
     navigationTarget.current = home && (sections.some(([, id]) => id === hash) || hash === "writing") ? hash : undefined;
     let frame = 0;
     let height = 0;
+    const introHeading = document.getElementById("intro-heading");
     const targets = ["about", "experience", "skills", "projects", "writing"].map(id => document.getElementById(id)).filter((target): target is HTMLElement => target !== null);
     function update() {
       frame = 0;
       if (!home) return;
+      const introBottom = introHeading?.getBoundingClientRect().bottom;
+      setShowHeaderName(introBottom !== undefined && introBottom <= height + 4);
       let current: string | undefined;
       for (const target of targets) {
         if (target.getBoundingClientRect().top <= height + 25) current = target.id;
       }
+      if (window.scrollY <= 1 && targets[0]?.id === "about") current = "about";
       if (window.scrollY > 0 && Math.ceil(window.scrollY + window.innerHeight) >= document.documentElement.scrollHeight - 2) {
         current = targets.at(-1)?.id;
       }
@@ -118,21 +127,21 @@ export function SiteHeader({ section = "home" }: { section?: "home" | "writing" 
   return <>
     <a href="#content" className={`fixed left-5 top-3 z-50 -translate-y-24 rounded bg-[#292d25] px-4 py-3 text-sm text-white focus:translate-y-0 ${focus}`}>Skip to content</a>
     <header ref={header} className="sticky top-0 z-40 border-b border-black/[0.07] bg-[#f8f8f5] dark:border-white/[0.07] dark:bg-[#0d0e0c]">
-      <div className="mx-auto grid max-w-[688px] grid-cols-[1fr_auto] items-center gap-x-4 px-6 py-2 sm:grid-cols-[auto_1fr_auto] sm:py-2.5">
-        <Link href={home ? "#top" : "/"} className={`inline-flex min-h-11 items-center justify-self-start rounded font-sans text-sm font-medium tracking-tight ${focus}`}>{profile.name.toLowerCase()}</Link>
-        <nav aria-label="Main navigation" className="col-span-2 row-start-2 flex flex-wrap gap-x-4 text-sm sm:col-span-1 sm:col-start-2 sm:row-start-1 sm:justify-end sm:gap-x-5">
+      <div className="relative mx-auto grid max-w-[688px] grid-cols-[minmax(0,1fr)_auto] grid-rows-[minmax(44px,auto)] items-center px-6 py-2 sm:grid-rows-[44px] sm:py-2.5">
+        {home && <Link href="#top" aria-hidden={!headerNameVisible} tabIndex={headerNameVisible ? 0 : -1} className={`absolute left-6 top-2 z-10 hidden h-11 items-center whitespace-nowrap rounded font-sans text-sm font-medium tracking-tight transition-[opacity,transform] duration-500 ease-[cubic-bezier(.16,1,.3,1)] motion-reduce:transition-none sm:inline-flex sm:top-1/2 sm:-translate-y-1/2 ${headerNameVisible ? "scale-100 opacity-100" : "pointer-events-none scale-95 opacity-0"} ${focus}`}>{profile.name}</Link>}
+        <nav aria-label="Main navigation" className={`col-span-1 row-start-1 flex flex-wrap items-center gap-x-0.5 text-sm transition-[padding] duration-500 ease-[cubic-bezier(.16,1,.3,1)] motion-reduce:transition-none sm:col-start-1 sm:row-start-1 sm:gap-x-1 ${home && showHeaderName ? "sm:pl-40" : "sm:pl-0"}`}>
           {sections.map(([label, id]) => <Link key={id} href={`${home ? "" : "/"}#${id}`} onClick={event => {
             if (!home || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
             navigationTarget.current = id;
             setActiveSection(id);
-          }} aria-current={home && activeSection === id ? "location" : undefined} className={`inline-flex min-h-11 touch-manipulation items-center rounded transition-colors hover:text-[#292d25] dark:hover:text-[#edeee8] ${home && activeSection === id ? activeLink : muted} ${focus}`}>{label}</Link>)}
+          }} aria-current={home && activeSection === id ? "location" : undefined} className={navigationLinkClass(home && activeSection === id)}>{label}</Link>)}
           <Link href={home ? "#writing" : "/writing"} onClick={event => {
             if (!home || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
             navigationTarget.current = "writing";
             setActiveSection("writing");
-          }} aria-current={home && activeSection === "writing" ? "location" : !home && section === "writing" ? "page" : undefined} className={`inline-flex min-h-11 touch-manipulation items-center rounded transition-colors hover:text-[#292d25] dark:hover:text-[#edeee8] ${home && activeSection === "writing" || !home && section === "writing" ? activeLink : muted} ${focus}`}>Writing</Link>
+          }} aria-current={home && activeSection === "writing" ? "location" : !home && section === "writing" ? "page" : undefined} className={navigationLinkClass(home && activeSection === "writing" || !home && section === "writing")}>Writing</Link>
         </nav>
-        <div className="col-start-2 row-start-1 sm:col-start-3"><ThemeSwitch /></div>
+        <div className="col-start-2 row-start-1 sm:col-start-2"><ThemeSwitch /></div>
       </div>
     </header>
   </>;

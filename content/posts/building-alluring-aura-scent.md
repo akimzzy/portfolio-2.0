@@ -3,39 +3,64 @@ title: "Building a Next.js E-commerce App: Alluring Aura Scent"
 summary: "How I built a Next.js e-commerce app for a perfume store, with Cloudflare Workers, IndexedDB catalogue caching, and shared online and in-store inventory."
 slug: "building-nextjs-ecommerce-app"
 author: "Akeem Adeyemi"
-image: "/writing/nextjs-ecommerce-alluring-aura-scent-mobile.jpg"
-imageWidth: 390
-imageHeight: 844
-imageAlt: "Alluring Aura Scent mobile storefront with a budget finder and trending fragrances"
+image: "/projects/alluring-home-trending-phone.png"
+imageWidth: 941
+imageHeight: 1672
+imageAlt: "Alluring Aura Scent mobile home page with the fragrance budget finder, trending products, and bottom navigation"
 topics: ["e-commerce", "nextjs", "indexeddb", "caching", "cloudflare"]
 screenshots:
-  - src: "/projects/alluring-storefront-mobile.jpg"
-    label: "Storefront"
-    alt: "Alluring Aura Scent mobile storefront with a budget finder and trending fragrances"
-    width: 390
-    height: 844
-  - src: "/projects/alluring-catalogue-mobile.jpg"
-    label: "Catalogue"
-    alt: "Alluring Aura Scent mobile catalogue showing fragrance products and prices"
-    width: 390
-    height: 844
-  - src: "/projects/alluring-product-mobile.jpg"
-    label: "Product details"
-    alt: "Alluring Aura Scent mobile product page for Qasida Signature, with price, description, and add-to-cart button"
-    width: 390
-    height: 844
-  - src: "/projects/alluring-categories-mobile.jpg"
-    label: "Categories"
-    alt: "Alluring Aura Scent mobile screen for browsing fragrance categories"
-    width: 390
-    height: 844
-  - src: "/projects/alluring-search-mobile.jpg"
+  - src: "/projects/alluring-home-trending-phone.png"
+    label: "Home and trending fragrances"
+    alt: "Alluring Aura Scent mobile home page with the fragrance budget finder, trending products, and bottom navigation"
+    width: 941
+    height: 1672
+  - src: "/projects/alluring-quick-picks-drawer-phone.png"
+    label: "Quick Picks"
+    alt: "Alluring Aura Scent Quick Picks drawer showing featured fragrances and an option to explore the selection"
+    width: 941
+    height: 1672
+  - src: "/projects/alluring-shop-phone.png"
+    label: "Shop"
+    alt: "Alluring Aura Scent shop with filters, sorting, and a two-column fragrance catalogue"
+    width: 852
+    height: 1846
+  - src: "/projects/alluring-search-phone.png"
     label: "Search"
-    alt: "Alluring Aura Scent mobile fragrance search results for Lattafa"
-    width: 390
-    height: 844
+    alt: "Alluring Aura Scent search showing Oud fragrance results"
+    width: 852
+    height: 1846
+  - src: "/projects/alluring-brands-phone.png"
+    label: "Brands"
+    alt: "Alluring Aura Scent brand directory with fragrance counts and search"
+    width: 852
+    height: 1846
+  - src: "/projects/alluring-offers-phone.png"
+    label: "Offers"
+    alt: "Alluring Aura Scent offers page with perfume bundles and sale prices"
+    width: 852
+    height: 1846
+  - src: "/projects/alluring-product-details-phone.png"
+    label: "Product details"
+    alt: "Alluring Aura Scent Strike Black product details with price, description, and Add to cart button"
+    width: 852
+    height: 1846
+  - src: "/projects/alluring-quick-picks-phone.png"
+    label: "Quick Picks product"
+    alt: "Alluring Aura Scent Quick Picks product view for Khamrah Body Spray with price and Add to cart button"
+    width: 852
+    height: 1846
+  - src: "/projects/alluring-order-tracking-phone.png"
+    label: "Order tracking"
+    alt: "Alluring Aura Scent order tracking form requesting an order ID and checkout email"
+    width: 852
+    height: 1846
+  - src: "/projects/alluring-contact-faq-phone.png"
+    label: "Contact and FAQs"
+    alt: "Alluring Aura Scent contact page with expandable customer support questions"
+    width: 941
+    height: 1672
 date: "2026-10-18"
-modified: "2026-10-19"
+modified: "2026-10-24"
 draft: false
 ---
 

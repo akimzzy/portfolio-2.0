@@ -52,7 +52,7 @@ export function loadPosts(root = path.join(process.cwd(), "content")): WritingPo
       const imageFields = [data.imageAlt, data.imageWidth, data.imageHeight];
       if (data.image === undefined && imageFields.some(value => value !== undefined)) throw new Error(`${label}: image details require an image`);
       if (data.image !== undefined) {
-        if (typeof data.image !== "string" || !data.image.startsWith("/writing/") || data.image.includes("..")) throw new Error(`${label}: image must be a local writing asset`);
+        if (typeof data.image !== "string" || !/^\/(writing|projects)\//.test(data.image) || data.image.includes("..")) throw new Error(`${label}: image must be a local writing or project asset`);
         if (typeof data.imageAlt !== "string" || !data.imageAlt.trim()) throw new Error(`${label}: image alt text is required`);
         for (const dimension of [data.imageWidth, data.imageHeight]) {
           if (!Number.isSafeInteger(dimension) || dimension <= 0) throw new Error(`${label}: positive image dimensions required`);

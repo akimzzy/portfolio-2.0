@@ -7,6 +7,7 @@ import { useEffect, useRef, useState } from "react";
 import { Arrow } from "./arrow";
 import { SiteHeader } from "./site-header";
 import { SiteFooter } from "./site-footer";
+import { lockDocumentScroll } from "./document-scroll-lock";
 import { education, experience, profile, projects, skills, type Entry } from "./portfolio-data";
 
 const muted = "text-[#686d63] dark:text-[#a4a89c]";
@@ -32,13 +33,21 @@ function ContactIcon({ name }: { name: "github" | "linkedin" | "email" | "resume
   </svg>;
 }
 
+function ExternalLinkIcon() {
+  return <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5 shrink-0">
+    <path d="M14 4h6v6m0-6-9 9" />
+    <path d="M18 13v5a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h5" />
+  </svg>;
+}
+
 function Contact({ href, label, icon, download = false }: { href: string; label: string; icon: "github" | "linkedin" | "email" | "resume"; download?: boolean }) {
-  return <a href={href} download={download || undefined} target={download || href.startsWith("mailto:") ? undefined : "_blank"} rel={download ? undefined : "noopener noreferrer"} className={`inline-flex min-h-11 touch-manipulation items-center justify-center gap-2 bg-black/[0.055] px-4 py-2 text-[13px] font-medium transition-colors hover:bg-black/[0.09] dark:bg-white/[0.075] dark:hover:bg-white/[0.12] ${focus}`}><ContactIcon name={icon} />{label}</a>;
+  const opensNewTab = !download && !href.startsWith("mailto:");
+  return <a href={href} download={download || undefined} target={opensNewTab ? "_blank" : undefined} rel={opensNewTab ? "noopener noreferrer" : undefined} className={`inline-flex min-h-11 touch-manipulation items-center justify-center gap-2 bg-black/[0.055] px-4 py-2 text-[13px] font-medium transition-colors hover:bg-black/[0.09] dark:bg-white/[0.075] dark:hover:bg-white/[0.12] ${focus}`}><ContactIcon name={icon} />{label}{opensNewTab && <><ExternalLinkIcon /><span className="sr-only"> (opens in a new tab)</span></>}</a>;
 }
 
 function ProjectLink({ href, label }: { href?: string; label: string }) {
   if (!href) return null;
-  return <a href={href} target="_blank" rel="noopener noreferrer" className={`inline-flex min-h-11 items-center gap-2 rounded text-sm ${link} ${focus}`}>{label}<Arrow /></a>;
+  return <a href={href} target="_blank" rel="noopener noreferrer" className={`inline-flex min-h-11 items-center gap-2 rounded text-sm ${link} ${focus}`}>{label}<ExternalLinkIcon /><span className="sr-only"> (opens in a new tab)</span></a>;
 }
 
 function ProjectList({ entries, onOpen }: { entries: Entry[]; onOpen: (entry: Entry) => void }) {
@@ -66,10 +75,9 @@ export default function Portfolio({ articles, articleCount }: { articles: Homepa
     if (!detail) return;
     previousFocus.current = document.activeElement as HTMLElement;
     dialog.current?.showModal();
-    const wasLocked = document.body.classList.contains("overflow-hidden");
-    document.body.classList.add("overflow-hidden");
+    const unlockScroll = lockDocumentScroll();
     return () => {
-      if (!wasLocked) document.body.classList.remove("overflow-hidden");
+      unlockScroll();
       previousFocus.current?.focus();
     };
   }, [detail]);
@@ -194,8 +202,8 @@ export default function Portfolio({ articles, articleCount }: { articles: Homepa
             </div>
           </div>
           <div className="min-h-0 overflow-y-auto overscroll-contain px-6 pb-[max(1.5rem,env(safe-area-inset-bottom))] sm:px-8 sm:pb-8">
-            {detail.screenshots?.length ? <ProjectGallery key={detail.id} title={detail.title} screenshots={detail.screenshots} /> : null}
-            {!detail.screenshots?.length && detail.image && <div className="relative mt-6 aspect-video overflow-hidden rounded-lg"><Image src={detail.image} alt={detail.imageAlt ?? `${detail.title} screenshot`} fill sizes="(max-width: 640px) 90vw, 576px" className="object-contain" /></div>}
+            {detail.screenshots?.length ? <ProjectGallery key={detail.id} title={detail.title} screenshots={detail.screenshots} hint="Tap to enlarge" /> : null}
+            {!detail.screenshots?.length && detail.image && <div className="relative mt-6 aspect-video overflow-hidden rounded-lg"><Image src={detail.image} alt={detail.imageAlt ?? `${detail.title} screenshot`} fill sizes="(max-width: 640px) 90vw, 576px" quality={90} className="object-contain" /></div>}
             <p className="mt-6 text-sm leading-6">{detail.summary}</p>
             {detail.detailHeadings ? <div className="mt-5 space-y-5">
               {detail.description.split("\n\n").map((paragraph, index) => <section key={paragraph}>

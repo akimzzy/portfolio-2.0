@@ -4,6 +4,7 @@ import Image from "next/image";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { ProjectScreenshot } from "./portfolio-data";
+import { lockDocumentScroll } from "./document-scroll-lock";
 
 const focus = "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#5277ae] dark:focus-visible:outline-[#a9bddf]";
 
@@ -16,8 +17,7 @@ export function ImageViewer({ title, screenshots, initialIndex, onClose }: { tit
     const previous = document.activeElement as HTMLElement | null;
     const element = dialog.current;
     element?.showModal();
-    const wasLocked = document.body.classList.contains("overflow-hidden");
-    document.body.classList.add("overflow-hidden");
+    const unlockScroll = lockDocumentScroll();
     const resize = () => {
       const container = track.current;
       if (container) container.scrollTo({ left: container.clientWidth * Number(container.dataset.active), behavior: "instant" });
@@ -28,7 +28,7 @@ export function ImageViewer({ title, screenshots, initialIndex, onClose }: { tit
     return () => {
       observer.disconnect();
       element?.close();
-      if (!wasLocked) document.body.classList.remove("overflow-hidden");
+      unlockScroll();
       previous?.focus();
     };
   }, []);
@@ -61,9 +61,14 @@ export function ImageViewer({ title, screenshots, initialIndex, onClose }: { tit
         </button>
       </div>
       <ul ref={track} data-active={active} aria-label="Full-size screenshots" onScroll={event => setActive(Math.round(event.currentTarget.scrollLeft / event.currentTarget.clientWidth))} className="flex min-h-0 flex-1 snap-x snap-mandatory overflow-x-auto overflow-y-hidden overscroll-x-contain">
-        {screenshots.map((screenshot, index) => <li key={screenshot.src} tabIndex={active === index ? 0 : -1} aria-label={`${screenshot.label}, ${index + 1} of ${screenshots.length}`} className={`flex h-full w-full shrink-0 snap-center items-start justify-center overflow-y-auto overscroll-y-contain sm:items-center ${focus}`}>
-          <Image src={screenshot.src} alt={screenshot.alt} width={screenshot.width} height={screenshot.height} sizes="100vw" className="h-auto w-full max-w-full shrink-0 sm:max-h-full sm:w-auto sm:object-contain" />
-        </li>)}
+        {screenshots.map((screenshot, index) => {
+          const isLandscape = screenshot.width > screenshot.height;
+          return <li key={screenshot.src} tabIndex={active === index ? 0 : -1} aria-label={`${screenshot.label}, ${index + 1} of ${screenshots.length}`} className={`flex h-full w-full shrink-0 snap-center items-center justify-center overflow-hidden ${focus}`}>
+            <div className={`relative shrink-0 ${isLandscape ? "h-full w-full" : "aspect-[9/16] h-full max-h-full w-auto max-w-full"}`}>
+              <Image src={screenshot.src} alt={screenshot.alt} fill sizes={isLandscape ? "100vw" : "(max-width: 640px) 56.25vh, 56.25vh"} quality={90} className="object-contain" />
+            </div>
+          </li>;
+        })}
       </ul>
       <div className="flex shrink-0 items-center justify-center gap-4 px-4 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2">
         {[-1, 0, 1].map(direction => direction === 0 ? <span key={direction} aria-live="polite" aria-atomic="true" className="min-w-10 text-center text-xs tabular-nums">{active + 1} / {screenshots.length}</span> : <button key={direction} type="button" aria-label={direction < 0 ? "Previous image" : "Next image"} disabled={direction < 0 ? active === 0 : active === screenshots.length - 1} onClick={() => move(active + direction)} className={`flex h-11 w-11 items-center justify-center rounded-full hover:bg-black/5 disabled:opacity-25 dark:hover:bg-white/5 ${focus}`}>

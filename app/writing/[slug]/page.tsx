@@ -37,8 +37,8 @@ async function Article({ params }: ArticleProps) {
       <p className="mt-4 text-[17px] leading-7 text-[#4e5449] dark:text-[#c5c8bc]">{post.summary}</p>
     </header>
     {post.screenshots?.length ? <div className="mt-8">
-      <ProjectGallery title={post.title} screenshots={post.screenshots} hint="Select an image to enlarge. Scroll horizontally to see more." />
-    </div> : post.image && <Image src={post.image} alt={post.imageAlt ?? ""} width={post.imageWidth!} height={post.imageHeight!} sizes="(max-width: 688px) calc(100vw - 48px), 640px" className="mt-8 h-auto w-full rounded-lg" />}
+      <ProjectGallery title={post.title} screenshots={post.screenshots} hint="Tap to enlarge" />
+    </div> : post.image && <Image src={post.image} alt={post.imageAlt ?? ""} width={post.imageWidth!} height={post.imageHeight!} sizes="(max-width: 688px) calc(100vw - 48px), 640px" quality={90} className="mt-8 h-auto w-full rounded-lg" />}
     <ArticleBody content={post.content} />
     <CodeCopyController />
     {recommendations.length > 0 && <nav aria-labelledby="read-next-heading" className="mt-12">

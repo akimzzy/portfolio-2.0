@@ -36,7 +36,7 @@ assert.match(article, /Keeping cached data in its place/);
 assert.match(article, /"@type":"BlogPosting"/);
 assert.match(article, /aria-label="About \d+ minutes? to read"/);
 assert.equal([...article.matchAll(/<h1\b/g)].length, 1);
-for (const label of ['Enlarge Storefront', 'Enlarge Catalogue', 'Enlarge Product details', 'Enlarge Categories', 'Enlarge Search']) assert.ok(article.includes(label));
+for (const label of ['Enlarge Home and trending fragrances', 'Enlarge Quick Picks', 'Enlarge Shop', 'Enlarge Search', 'Enlarge Brands', 'Enlarge Offers', 'Enlarge Product details', 'Enlarge Quick Picks product', 'Enlarge Order tracking', 'Enlarge Contact and FAQs']) assert.ok(article.includes(label));
 assert.match(article, /id="read-next-heading"/);
 assert.match(article, /href="\/writing\/indexeddb-catalogue-synchronisation"/);
 assert.match(writing, /Building an IndexedDB catalogue that stays in sync/);
@@ -100,11 +100,11 @@ assert.match(pdf.headers.get('content-type') ?? '', /application\/pdf/);
 const pdfBytes = Buffer.from(await pdf.arrayBuffer());
 assert.ok(pdfBytes.equals(await readFile('public/akeem-adeyemi-resume.pdf')), 'The downloadable resume must match the reviewed artifact');
 
-for (const path of ['/writing/nextjs-ecommerce-alluring-aura-scent-mobile.jpg', '/opengraph-image.png', '/twitter-image.png', '/apple-icon.png', '/favicon.ico', '/projects/alluring-storefront-mobile.jpg', '/projects/alluring-catalogue-mobile.jpg', '/projects/alluring-product-mobile.jpg', '/projects/alluring-categories-mobile.jpg', '/projects/alluring-search-mobile.jpg', '/projects/quikcity.jpg', '/projects/quikcity-hero-mobile.jpg', '/projects/quikcity-how-it-works-desktop.jpg', '/projects/quikcity-vendors-mobile.jpg']) {
+for (const path of ['/opengraph-image.png', '/twitter-image.png', '/apple-icon.png', '/favicon.ico', '/projects/alluring-home-trending-phone.png', '/projects/alluring-quick-picks-phone.png', '/projects/alluring-quick-picks-drawer-phone.png', '/projects/alluring-product-details-phone.png', '/projects/alluring-shop-phone.png', '/projects/alluring-search-phone.png', '/projects/alluring-brands-phone.png', '/projects/alluring-order-tracking-phone.png', '/projects/alluring-offers-phone.png', '/projects/alluring-contact-faq-phone.png', '/projects/quikcity.jpg', '/projects/quikcity-hero-mobile.jpg', '/projects/quikcity-how-it-works-desktop.jpg', '/projects/quikcity-vendors-mobile.jpg']) {
   const response = await get(path);
   assert.match(response.headers.get('content-type') ?? '', /image\//);
 }
-const optimized = await get('/_next/image?url=%2Fprojects%2Falluring-storefront-mobile.jpg&w=256&q=75');
+const optimized = await get('/_next/image?url=%2Fprojects%2Falluring-home-trending-phone.png&w=256&q=75');
 assert.match(optimized.headers.get('content-type') ?? '', /image\//);
 const robots = await (await get('/robots.txt')).text();
 const sitemap = await (await get('/sitemap.xml')).text();
