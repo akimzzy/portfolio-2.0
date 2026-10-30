@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import localFont from "next/font/local";
+import { Analytics } from "@vercel/analytics/next";
 import "./globals.css";
 import { siteDescription, siteUrl } from "./site-config";
 
@@ -45,7 +46,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       className={`${cabinetGrotesk.variable} h-full antialiased [scrollbar-width:none] [&_*]:[scrollbar-width:none] [&::-webkit-scrollbar]:hidden [&_*::-webkit-scrollbar]:hidden [color-scheme:light] dark:[color-scheme:dark]`}
     >
       <head><script id="portfolio-theme" dangerouslySetInnerHTML={{ __html: `try{var t=localStorage.getItem("portfolio-theme");if(t==="light"||t==="dark")document.documentElement.dataset.theme=t}catch{}` }} /></head>
-      <body className="min-h-full bg-[#f8f8f5] font-sans text-[#292d25] antialiased selection:bg-[#dce5f2] selection:text-[#292d25] dark:bg-[#0d0e0c] dark:text-[#edeee8]">{children}</body>
+      <body className="min-h-full bg-[#f8f8f5] font-sans text-[#292d25] antialiased selection:bg-[#dce5f2] selection:text-[#292d25] dark:bg-[#0d0e0c] dark:text-[#edeee8]">{children}<Analytics /></body>
     </html>
   );
 }
