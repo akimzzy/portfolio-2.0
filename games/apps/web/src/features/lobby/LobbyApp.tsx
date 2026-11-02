@@ -1,8 +1,11 @@
-import { useEffect, useRef, useSyncExternalStore, type KeyboardEvent as ReactKeyboardEvent } from 'react';
+import { useEffect, useMemo, useRef, useSyncExternalStore, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { lobbyClient, type LobbyMatch } from './lobby-client';
 import { GAME_CATALOG } from '../../games/registry';
 import type { GameController } from '../../app/controller-contract';
 import { showDialogWithoutActionFocus } from '../../shared/show-dialog';
+import { uniqueDisplayNames } from '../../shared/guest-names';
+import { opponentProfilesForLobby } from '../../games/opponents';
+import { inHouseMatchCount, MAX_IN_HOUSE_MATCH_COUNT } from './lobby-opponents.js';
 
 function seriesLabel(target: number): string {
   return target === 1 ? 'One game' : `First to win ${target}`;
@@ -14,6 +17,7 @@ export default function LobbyApp({ controller }: { controller: GameController })
   const tab = app.lobbyTab;
   const dialogRef = useRef<HTMLDialogElement>(null);
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const opponentNames = useMemo(() => uniqueDisplayNames(MAX_IN_HOUSE_MATCH_COUNT), []);
   const filter = lobbyState.filter;
 
   useEffect(() => {
@@ -41,6 +45,15 @@ export default function LobbyApp({ controller }: { controller: GameController })
   }, [tab, filter]);
 
   const filteredMatches = lobbyState.matches.filter((match) => filter === 'all' || match.gameId === filter);
+  const opponentProfiles = opponentProfilesForLobby(filter);
+  const aiOpponentCount = inHouseMatchCount(lobbyState.totalMatches ?? filteredMatches.length, opponentProfiles.length > 0);
+  const availableOpponents = lobbyState.hasLoadedSnapshot && !lobbyState.hasMore
+    ? Array.from({ length: aiOpponentCount }, (_, index) => ({
+      ...opponentProfiles[index % opponentProfiles.length]!,
+      displayName: opponentNames[index]!,
+      seriesTarget: ([1, 2, 3] as const)[index % 3]!,
+    }))
+    : [];
   const selectedGame = GAME_CATALOG.find((game) => game.id === filter);
   const openFilter = () => { if (dialogRef.current && !dialogRef.current.open) showDialogWithoutActionFocus(dialogRef.current); };
   const onTabKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
@@ -70,21 +83,25 @@ export default function LobbyApp({ controller }: { controller: GameController })
       </nav>
       {tab === 'matches' && <div className="lobby-filter-row">
         <button className="lobby-filter-trigger" type="button" aria-haspopup="dialog" aria-controls="lobby-filter-dialog" onClick={openFilter}><span>{selectedGame?.title ?? 'All games'}</span></button>
+        <button className="lobby-create-match" type="button" aria-label="Create a match" title="Create a match" onClick={() => controller.setLobbyTab('games', true)}>Create</button>
       </div>}
     </div>
 
     <section className="lobby-panel" id="matches-panel" role="tabpanel" aria-labelledby="matches-tab" hidden={tab !== 'matches'}>
       <div className="lobby-match-list" role="region" tabIndex={0} aria-label="Open matches for the selected game" aria-live="polite" aria-busy={!lobbyState.hasLoadedSnapshot && lobbyState.connection !== 'connected'}>
-        {filteredMatches.length === 0 ? !lobbyState.hasLoadedSnapshot ? <p className="lobby-empty">{lobbyState.connection === 'reconnecting' ? 'Reconnecting…' : 'Loading matches…'}</p> : <div className="lobby-empty-state">
-          <h2>No open matches</h2><button className="lobby-primary" type="button" onClick={() => controller.setLobbyTab('games')}>Choose a game</button>
-        </div> : filteredMatches.map((match) => {
+        {filteredMatches.length === 0 && !lobbyState.hasLoadedSnapshot && <p className="lobby-empty">{lobbyState.connection === 'reconnecting' ? 'Reconnecting…' : 'Loading matches…'}</p>}
+        {filteredMatches.map((match) => {
           const game = GAME_CATALOG.find((item) => item.id === match.gameId);
           if (!game) return null;
           return <article className="lobby-match-row" key={match.matchId}>
-            <div className="lobby-match-copy"><strong>{match.displayName} is waiting</strong><span>{game.title} · {seriesLabel(match.seriesTarget)}</span></div>
-            <button className="lobby-join-button" type="button" aria-label={`Join ${match.displayName}’s ${game.title} match`} onClick={() => join(match)}>Join</button>
+            <div className="lobby-match-copy"><strong>{match.displayName}</strong><span>{game.title} · {seriesLabel(match.seriesTarget)}</span></div>
+            <button className="lobby-join-button" type="button" aria-label={`Play ${game.title} with ${match.displayName}`} onClick={() => join(match)}>Play</button>
           </article>;
         })}
+        {availableOpponents.map((opponent, index) => <article className="lobby-match-row" key={`opponent-${index}`}>
+            <div className="lobby-match-copy"><strong>{opponent.displayName}</strong><span>{GAME_CATALOG.find((game) => game.id === opponent.gameId)?.title ?? 'Game'} · {seriesLabel(opponent.seriesTarget)}</span></div>
+            <button className="lobby-join-button" type="button" aria-label={`Play ${GAME_CATALOG.find((game) => game.id === opponent.gameId)?.title ?? 'game'} with ${opponent.displayName}`} onClick={() => controller.playOpponentMatch(opponent.gameId, opponent.id, opponent.displayName, opponent.seriesTarget)}>Play</button>
+          </article>)}
       </div>
       {lobbyState.hasMore && <button className="lobby-load-more" type="button" disabled={lobbyState.loadingMore} onClick={() => lobbyClient.loadMore()}>{lobbyState.loadingMore ? 'Loading…' : 'Show more matches'}</button>}
       {(app.lobbyError || lobbyState.error) && <p className="lobby-error" role="status" aria-live="polite">{app.lobbyError || lobbyState.error}</p>}

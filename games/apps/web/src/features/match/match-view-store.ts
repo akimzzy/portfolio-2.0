@@ -1,5 +1,6 @@
 import type { MatchReactionId } from '../../../../../packages/contracts/dist/index.js';
 import type { PlayerSeat } from '../../../../../packages/contracts/dist/index.js';
+import type { LiveMatch } from './match-types.js';
 export type { PlayerSeat } from '../../../../../packages/contracts/dist/index.js';
 export type GameDialogView = {
   mode: string;
@@ -18,7 +19,7 @@ export type GameDialogView = {
   countdown: { label: string; deadline: number | null; clockOffset: number } | null;
 };
 export type OnlineDialogView = {
-  mode: 'create' | 'join' | 'retry' | 'invite' | 'message';
+  mode: 'create' | 'join' | 'opponent' | 'retry' | 'invite' | 'message';
   title: string;
   description: string;
   error: string;
@@ -36,6 +37,14 @@ export type OnlineDialogView = {
   closeLabel: string;
 };
 export type MatchViewSnapshot = {
+  matchId: string | null;
+  status: LiveMatch['status'] | null;
+  hasAiOpponent: boolean;
+  aiSeat: PlayerSeat | null;
+  aiThinking: boolean;
+  aiReveal: boolean;
+  aiRevealStarted: boolean;
+  aiThinkDelayMs: number;
   gameId: string;
   rulesVersion: number;
   gameState: unknown;
@@ -56,6 +65,7 @@ export type MatchViewSnapshot = {
   players: readonly {
     seat: PlayerSeat;
     name: string;
+    opponentNote: string | null;
     isSelf: boolean;
     seatLabel: string;
     score: number;
@@ -81,6 +91,8 @@ export type MatchViewSnapshot = {
 };
 
 const EMPTY_SNAPSHOT: MatchViewSnapshot = {
+  matchId: null,
+  status: null, hasAiOpponent: false, aiSeat: null, aiThinking: false, aiReveal: false, aiRevealStarted: false, aiThinkDelayMs: 0,
   gameId: 'connect-four', rulesVersion: 2, gameState: null, actionCount: 0,
   nextPlayer: 'first', outcome: null,
   statusText: 'Player 1 to move', boardHint: 'Choose a column.', canPlay: true,
@@ -88,8 +100,8 @@ const EMPTY_SNAPSHOT: MatchViewSnapshot = {
   reactionsVisible: false, canReact: false, socialFeedback: null, activityNotice: null, hasUnreadActivity: false,
   roundLabel: 'Game 1 · 0 moves',
   players: [
-    { seat: 'first', name: 'Player 1', isSelf: false, seatLabel: 'Goes first', score: 0, active: true, winner: false },
-    { seat: 'second', name: 'Player 2', isSelf: false, seatLabel: 'Goes second', score: 0, active: false, winner: false },
+    { seat: 'first', name: 'Player 1', opponentNote: null, isSelf: false, seatLabel: 'Goes first', score: 0, active: true, winner: false },
+    { seat: 'second', name: 'Player 2', opponentNote: null, isSelf: false, seatLabel: 'Goes second', score: 0, active: false, winner: false },
   ],
   detail: { format: 'Local practice', game: 'Game 1', room: 'Local', firstName: 'Player 1', secondName: 'Player 2', firstScore: 0, secondScore: 0, status: 'Player 1 to move' },
   turnCountdown: null, turnReceipt: null, startCountdown: null, dialog: null, dialogReturnValue: '', onlineDialog: null,

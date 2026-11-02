@@ -10,6 +10,7 @@ export type LiveMatch = {
   state: unknown | null;
   connectedSeats?: readonly boolean[];
   playerNames?: readonly (string | null)[];
+  seatKinds?: readonly ('human' | 'ai')[];
   countdownAt: number | null;
   turnDeadline: number | null;
   awaitingTurnReceipt?: { seat: PlayerSeat; deadline: number } | null;
@@ -75,9 +76,11 @@ export function parseLiveMatch(value: unknown): LiveMatch | null {
   const wins = value.wins;
   const nullableNumber = (entry: unknown) => entry === null || (typeof entry === 'number' && Number.isFinite(entry));
   const optionalSeats = (entry: unknown) => entry === undefined || (Array.isArray(entry) && entry.length === 2 && entry.every((item) => typeof item === 'boolean'));
+  const validSeatKinds = value.seatKinds === undefined || (Array.isArray(value.seatKinds) && value.seatKinds.length === 2 && value.seatKinds.every((item) => item === 'human' || item === 'ai'));
   if (!isRecord(wins) || !Number.isSafeInteger(wins.first) || !Number.isSafeInteger(wins.second) ||
     !nullableNumber(value.countdownAt) || !nullableNumber(value.turnDeadline) || !nullableNumber(value.nextGameDeadline) ||
-    !optionalSeats(value.connectedSeats) || !optionalSeats(value.nextReady) || !optionalSeats(value.rematchReady) || !optionalSeats(value.closedSeats)) return null;
+    !optionalSeats(value.connectedSeats) || !optionalSeats(value.nextReady) || !optionalSeats(value.rematchReady) || !optionalSeats(value.closedSeats) ||
+    !validSeatKinds) return null;
   if (value.awaitingTurnReceipt !== undefined && value.awaitingTurnReceipt !== null &&
     (!isRecord(value.awaitingTurnReceipt) ||
       !isPlayerSeat(value.awaitingTurnReceipt.seat) ||

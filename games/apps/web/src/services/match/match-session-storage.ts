@@ -98,6 +98,35 @@ export class MatchSessionStorage {
     return reservation;
   }
 
+  async reserveWaitingReplacement(previous: ActiveMatch): Promise<MatchReservation | null> {
+    let reservation: MatchReservation | null = null;
+    const tryReserve = (): void => {
+      const current = this.readLock();
+      if (!current || 'pending' in current || current.matchId !== previous.matchId || current.seatToken !== previous.seatToken) return;
+      reservation = {
+        pending: true,
+        attemptId: crypto.randomUUID(),
+        operation: 'creating',
+        matchId: previous.matchId,
+        createdAt: Date.now(),
+      };
+      try { localStorage.setItem(ACTIVE_MATCH_KEY, JSON.stringify(reservation)); } catch {
+        reservation = { ...reservation, attemptId: null };
+      }
+    };
+    if (navigator.locks?.request) await navigator.locks.request('games-active-match-reservation', tryReserve);
+    else tryReserve();
+    return reservation;
+  }
+
+  restoreWaitingReplacement(reservation: MatchReservation, previous: ActiveMatch): boolean {
+    const current = this.readLock();
+    if (!current || !('pending' in current) || current.matchId !== reservation.matchId ||
+      (reservation.attemptId !== null && current.attemptId !== reservation.attemptId)) return false;
+    this.saveActiveMatch(previous);
+    return true;
+  }
+
   release(reservation: MatchReservation | null | undefined): boolean {
     if (!reservation?.attemptId) return false;
     try {

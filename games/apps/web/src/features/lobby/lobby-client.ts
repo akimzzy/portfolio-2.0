@@ -15,7 +15,6 @@ export type LobbyState = {
   totalMatches: number | null;
   cursor: string | null;
   hasMore: boolean;
-  onlineCount: number | null;
   connection: 'connecting' | 'connected' | 'reconnecting';
   error: string;
   canReconnect: boolean;
@@ -24,7 +23,7 @@ export type LobbyState = {
 };
 
 const INITIAL_STATE: LobbyState = {
-  matches: [], hasLoadedSnapshot: false, totalMatches: null, cursor: null, hasMore: false, onlineCount: null,
+  matches: [], hasLoadedSnapshot: false, totalMatches: null, cursor: null, hasMore: false,
   connection: 'connecting', error: '', canReconnect: false, loadingMore: false,
   filter: getInitialFilter(),
 };
@@ -45,20 +44,6 @@ function isLobbyMatch(value: unknown): value is LobbyMatch {
     typeof value.displayName === 'string' && value.displayName.trim().length > 0 && Array.from(value.displayName).length <= 24 &&
     (value.seriesTarget === 1 || value.seriesTarget === 2 || value.seriesTarget === 3) &&
     Number.isFinite(value.createdAt) && Number.isFinite(value.expiresAt);
-}
-
-export function readVisitorId(): string {
-  const key = 'games-presence-id';
-  try {
-    const existing = localStorage.getItem(key);
-    if (existing && /^[A-Za-z0-9_-]{22}$/.test(existing)) return existing;
-    const bytes = crypto.getRandomValues(new Uint8Array(16));
-    const value = btoa(String.fromCharCode(...bytes)).replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/, '');
-    localStorage.setItem(key, value);
-    return value;
-  } catch {
-    return `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 16)}`.slice(0, 22);
-  }
 }
 
 function socketUrl(filter: string): URL {
@@ -143,7 +128,7 @@ class LobbyClient {
 
     socket.addEventListener('open', () => {
       if (this.socket !== socket) return;
-      socket.send(JSON.stringify({ type: 'identify', visitorId: readVisitorId(), gameId: this.snapshot.filter === 'all' ? null : this.snapshot.filter }));
+      socket.send(JSON.stringify({ type: 'identify', gameId: this.snapshot.filter === 'all' ? null : this.snapshot.filter }));
       if (this.stableConnectionTimer !== null) window.clearTimeout(this.stableConnectionTimer);
       this.stableConnectionTimer = window.setTimeout(() => { this.reconnectAttempt = 0; }, 15_000);
       this.update({ ...this.snapshot, connection: 'connected', error: '', canReconnect: false });
@@ -169,7 +154,6 @@ class LobbyClient {
           totalMatches: Number.isSafeInteger(message.totalMatches) && Number(message.totalMatches) >= 0 ? Number(message.totalMatches) : this.snapshot.totalMatches,
           cursor: typeof message.nextCursor === 'string' ? message.nextCursor : null,
           hasMore: message.hasMore === true,
-          onlineCount: Number.isSafeInteger(message.onlineCount) && Number(message.onlineCount) >= 0 ? Number(message.onlineCount) : this.snapshot.onlineCount,
           loadingMore: false,
           error: '',
         });
@@ -184,8 +168,6 @@ class LobbyClient {
       } else if (message.type === 'lobby-rooms-remove' && Array.isArray(message.matchIds)) {
         const removed = new Set(message.matchIds.filter((item): item is string => typeof item === 'string'));
         this.update({ ...this.snapshot, matches: this.snapshot.matches.filter((item) => !removed.has(item.matchId)), totalMatches: Number.isSafeInteger(message.totalMatches) && Number(message.totalMatches) >= 0 ? Number(message.totalMatches) : this.snapshot.totalMatches });
-      } else if (message.type === 'lobby-presence' && Number.isSafeInteger(message.onlineCount) && Number(message.onlineCount) >= 0) {
-        this.update({ ...this.snapshot, onlineCount: Number(message.onlineCount) });
       } else if (message.type === 'lobby-error') {
         this.update({ ...this.snapshot, error: typeof message.message === 'string' ? message.message : 'Live matches are unavailable.' });
       }

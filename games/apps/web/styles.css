@@ -119,19 +119,21 @@ button { color: inherit; font: inherit; cursor: pointer; touch-action: manipulat
 .active-match-resume:hover { filter: brightness(.94); }
 .active-match-resume:disabled { cursor: wait; opacity: .75; }
 .active-match-resume:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
-.lobby-navigation-row { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
+.lobby-navigation-row { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
 .lobby-tabs { display: flex; min-width: 0; justify-content: flex-start; gap: 4px; overflow-x: auto; padding: 2px; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
 .lobby-tabs::-webkit-scrollbar { display: none; }
 .lobby-tabs[hidden] { display: none !important; }
 .lobby-tab { min-height: 34px; flex: 0 0 auto; padding: 0 12px; border: 1px solid var(--divider); border-radius: 6px; color: var(--muted); background: transparent; font: inherit; font-size: 12px; font-weight: 500; line-height: 1; white-space: nowrap; cursor: pointer; }
 .lobby-tab[aria-selected='true'] { border-color: var(--ink); color: var(--page); background: var(--ink); font-weight: 600; }
-.lobby-tab:focus-visible, .lobby-filter-trigger:focus-visible, .lobby-panel:focus-visible, .lobby-match-list:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.lobby-tab:focus-visible, .lobby-filter-trigger:focus-visible, .lobby-create-match:focus-visible, .lobby-panel:focus-visible, .lobby-match-list:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .lobby-panel { padding-top: 4px; }
 .lobby-panel[hidden] { display: none !important; }
-.lobby-filter-row { display: flex; flex: 0 0 auto; justify-content: flex-end; }
+.lobby-filter-row { display: flex; min-width: 0; flex: 0 0 auto; align-items: center; justify-content: flex-end; gap: 6px; }
 .lobby-filter-row[hidden] { display: none !important; }
-.lobby-filter-trigger { display: inline-flex; min-height: 34px; align-items: center; justify-content: center; gap: 7px; padding: 0 10px; border: 1px solid var(--divider); border-radius: 6px; color: var(--ink); background: var(--surface); font: inherit; font-size: 12px; font-weight: 500; line-height: 1; white-space: nowrap; cursor: pointer; }
+.lobby-filter-trigger, .lobby-create-match { display: inline-flex; min-height: 34px; align-items: center; justify-content: center; gap: 7px; padding: 0 9px; border: 1px solid var(--divider); border-radius: 6px; color: var(--ink); background: var(--surface); font: inherit; font-size: 12px; font-weight: 500; line-height: 1; white-space: nowrap; cursor: pointer; }
+.lobby-create-match { border-color: var(--link); color: var(--page); background: var(--link); }
 .lobby-filter-trigger:hover { border-color: color-mix(in srgb, var(--ink) 35%, var(--divider)); background: color-mix(in srgb, var(--ink) 4%, var(--surface)); }
+.lobby-create-match:hover { filter: brightness(.94); }
 .lobby-filter-trigger svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.35; }
 .lobby-filter-dialog .dialog-content { text-align: left; }
 .lobby-filter-dialog .dialog-content h2 { font-size: 19px; }
@@ -152,11 +154,9 @@ button { color: inherit; font: inherit; cursor: pointer; touch-action: manipulat
 .lobby-primary:hover, .lobby-join-button:hover { filter: brightness(.94); }
 .lobby-secondary, .lobby-load-more { color: var(--ink); background: var(--surface); }
 .lobby-secondary:hover, .lobby-load-more:hover { border-color: var(--link); }
-.lobby-match-list { margin-top: 4px; border-top: 1px solid var(--divider); }
-.lobby-empty-state { display: grid; justify-items: center; gap: 12px; padding: 26px 12px 30px; text-align: center; }
-.lobby-empty-state h2 { margin: 0; font-size: 15px; font-weight: 500; line-height: 21px; }
-.lobby-empty-state .lobby-primary { min-width: 142px; min-height: 42px; }
-.lobby-match-row { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--divider); }
+.lobby-match-list { margin-top: 4px; }
+.lobby-match-row { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 0; }
+.lobby-match-row + .lobby-match-row { border-top: 1px solid var(--divider); }
 .lobby-match-copy { display: grid; min-width: 0; gap: 3px; }
 .lobby-match-copy strong { overflow: hidden; font-size: 14px; font-weight: 600; line-height: 20px; text-overflow: ellipsis; white-space: nowrap; }
 .lobby-match-copy span { color: var(--muted); font-size: 12px; line-height: 18px; }
@@ -233,6 +233,7 @@ button { color: inherit; font: inherit; cursor: pointer; touch-action: manipulat
 .board-cell.is-first { border-color: #bf4f3e; background: var(--token-one); box-shadow: inset 0 2px 1px rgb(255 255 255 / .28), 0 1px 2px rgb(0 0 0 / .18); }
 .board-cell.is-second { border-color: #c6a632; background: var(--token-two); box-shadow: inset 0 2px 1px rgb(255 255 255 / .32), 0 1px 2px rgb(0 0 0 / .18); }
 .board-cell.is-pending { border-style: dashed; opacity: .55; }
+.board-cell.is-ai-reveal { opacity: 0; }
 .board-cell.is-last-move { outline: 2px solid var(--focus); outline-offset: 1px; }
 .board-cell.is-winning { position: relative; z-index: 1; box-shadow: inset 0 0 0 2px rgb(255 255 255 / .72); }
 .board-cell.is-winning::after { position: absolute; inset: -4px; transform: scale(.68); border: 2px solid var(--surface); border-radius: 50%; box-shadow: 0 0 0 2px var(--board); content: ''; opacity: 0; pointer-events: none; animation: winning-line-reveal 240ms cubic-bezier(.2, .8, .2, 1) both; animation-delay: calc(var(--win-order, 0) * 110ms); }
@@ -277,6 +278,20 @@ button { color: inherit; font: inherit; cursor: pointer; touch-action: manipulat
 .token-second { background: var(--token-two); }
 .player-copy { display: grid; min-width: 0; min-height: 44px; align-content: center; gap: 1px; }
 .player-name { overflow: hidden; font-size: 12px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.player-name-line { display: flex; min-width: 0; align-items: baseline; gap: 5px; }
+.player-opponent-note { flex: 0 0 auto; color: var(--muted); font-size: 9px; font-weight: 500; line-height: 13px; white-space: nowrap; }
+.waiting-assist { display: flex; width: min(100%, 540px); min-width: 0; align-items: center; justify-content: space-between; gap: 12px; margin: 0 auto 16px; padding: 10px 0; border-bottom: 1px solid var(--divider); color: var(--muted); font-size: 12px; }
+.waiting-assist-actions { display: flex; min-width: 0; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px; }
+.waiting-assist-actions .lobby-primary, .waiting-assist-actions .lobby-secondary { min-height: 34px; padding: 6px 10px; }
+.waiting-assist-browse { min-height: 34px; padding: 5px 8px; border: 0; color: var(--link); background: transparent; font-size: 12px; }
+.ai-opponent-dialog .dialog-content { text-align: left; }
+.ai-opponent-dialog .online-dialog-header { margin-bottom: 12px; padding-right: 34px; }
+.ai-opponent-dialog .online-dialog-header h2 { margin: 0; text-align: left; font-size: 19px; }
+.ai-opponent-options { display: grid; gap: 4px; }
+.ai-opponent-option { display: grid; min-height: 52px; gap: 2px; padding: 8px 10px; border: 1px solid var(--divider); border-radius: 5px; color: var(--ink); background: transparent; text-align: left; }
+.ai-opponent-option:hover, .ai-opponent-option:focus-visible { border-color: var(--link); background: var(--surface); }
+.ai-opponent-option strong { font-size: 13px; font-weight: 600; }
+.ai-opponent-option span { color: var(--muted); font-size: 11px; }
 .player-status-line { display: flex; min-width: 0; min-height: 26px; align-items: center; gap: 5px; overflow: hidden; color: var(--muted); font-size: 11px; line-height: 15px; text-overflow: ellipsis; white-space: nowrap; }
 .player-row.is-active .player-status-line { color: var(--link); font-weight: 600; }
 .match-activity-row { display: grid; width: min(100%, 540px); min-height: 48px; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: center; margin: 4px auto 0; }
@@ -461,6 +476,9 @@ button { color: inherit; font: inherit; cursor: pointer; touch-action: manipulat
   to { transform: translateY(0); opacity: 1; }
 }
 @media (max-width: 700px), (orientation: landscape) and (max-height: 520px) {
+  .waiting-assist { align-items: flex-start; flex-direction: column; gap: 7px; }
+  .waiting-assist-actions { width: 100%; justify-content: flex-start; }
+  .waiting-assist-actions .lobby-primary, .waiting-assist-actions .lobby-secondary { min-height: 38px; }
   .lobby-panel { padding-top: 10px; }
   .game-dialog input:not([type='radio']):not([type='checkbox']) { font-size: 16px; }
   .connection-notice { grid-template-columns: minmax(0, 1fr) auto; gap: 6px; }

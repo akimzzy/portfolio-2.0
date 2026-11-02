@@ -27,6 +27,21 @@ export class MatchApiClient {
     });
   }
 
+  createAiMatch(input: Readonly<{
+    gameId: string;
+    profileId: string;
+    seriesTarget: number;
+    displayName: string;
+    opponentName: string;
+  }>): Promise<MatchApiResponse> {
+    return this.request('/v1/matches/ai', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(input),
+      signal: AbortSignal.timeout(8_000),
+    });
+  }
+
   previewMatch(matchId: string, inviteToken: string | null, supportedGames: Readonly<Record<string, readonly number[]>>): Promise<MatchApiResponse> {
     return this.request(`/v1/matches/${encodeURIComponent(matchId)}/preview`, {
       method: 'POST',

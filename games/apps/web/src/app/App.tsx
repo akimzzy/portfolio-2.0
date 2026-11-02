@@ -3,6 +3,8 @@ import LobbyApp from "../features/lobby/LobbyApp";
 import MatchApp from "../features/match/MatchApp";
 import { createGameController } from "./application-controller";
 import { lobbyClient } from "../features/lobby/lobby-client";
+import { inHouseMatchCount } from "../features/lobby/lobby-opponents";
+import { opponentProfilesForLobby } from "../games/opponents";
 import type { OpeningMatchView } from "./game-app-store";
 
 export default function App() {
@@ -36,7 +38,7 @@ export default function App() {
         <div className="header-inner">
           <div className="game-title">
             <h1>{app.title}</h1>
-            {gameScreen ? app.description && <p aria-live="polite">{app.description}</p> : <LobbyPresence />}
+            {gameScreen ? app.description && <p aria-live="polite">{app.description}</p> : <LobbySummary />}
           </div>
           <div className="header-actions">
             {app.controls.homeVisible && (
@@ -161,16 +163,13 @@ function MatchOpening({ opening, onRetry, onBack }: {
   </section>;
 }
 
-function LobbyPresence() {
+function LobbySummary() {
   const lobby = useSyncExternalStore(lobbyClient.subscribe, lobbyClient.getSnapshot, lobbyClient.getSnapshot);
-  const hasCounts = lobby.onlineCount !== null || lobby.totalMatches !== null;
-  if (lobby.connection !== "connected" && !hasCounts && !lobby.hasLoadedSnapshot) {
-    return <p className="lobby-presence" aria-live="polite">{lobby.connection === "connecting" ? "Connecting…" : "Reconnecting…"}</p>;
+  if (lobby.connection !== "connected") {
+    return <p className="lobby-presence" role="status">{lobby.connection === "connecting" ? "Connecting…" : "Reconnecting…"}</p>;
   }
-  if (!hasCounts) return null;
-  return <p className="lobby-presence" aria-live="polite">
-    {lobby.onlineCount !== null && <span>{lobby.onlineCount} {lobby.onlineCount === 1 ? "player" : "players"} online</span>}
-    {lobby.onlineCount !== null && lobby.totalMatches !== null && <span aria-hidden="true"> · </span>}
-    {lobby.totalMatches !== null && <span>{lobby.totalMatches} open {lobby.totalMatches === 1 ? "match" : "matches"}</span>}
-  </p>;
+  if (lobby.totalMatches === null) return null;
+  const opponentCount = inHouseMatchCount(lobby.totalMatches, opponentProfilesForLobby(lobby.filter).length > 0);
+  const availableMatches = lobby.totalMatches + opponentCount;
+  return <p className="lobby-presence" aria-live="polite">{availableMatches} {availableMatches === 1 ? "match" : "matches"} available</p>;
 }

@@ -22,7 +22,6 @@ export type MatchSocketMessage =
 type TransportOptions = Readonly<{
   url: string;
   seatToken: string;
-  visitorId: string;
   getReconnectRemainingMs: () => number;
   getMatchStatus: () => string | undefined;
   onStateChange: (state: MatchTransportState) => void;
@@ -120,7 +119,6 @@ export class MatchTransport {
       socket.send(JSON.stringify({
         type: 'authenticate',
         seatToken: this.options.seatToken,
-        visitorId: this.options.visitorId,
         supportsTurnReceipt: true,
       }));
     });

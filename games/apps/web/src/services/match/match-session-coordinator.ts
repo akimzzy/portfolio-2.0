@@ -42,6 +42,12 @@ export type LeaveWaitingRoomResolution =
   | Readonly<{ status: 'not-waiting'; match: MatchApiBody }>
   | Readonly<{ status: 'rejected'; message: string }>;
 
+export type SwitchToAiResolution =
+  | Readonly<{ status: 'created'; matchId: string; seatToken: string }>
+  | Readonly<{ status: 'match-updated'; match: MatchApiBody }>
+  | Readonly<{ status: 'blocked'; lock: DeviceMatchLock | null }>
+  | Readonly<{ status: 'rejected'; message: string }>;
+
 /** Coordinates browser seat recovery with the authoritative match service. */
 export class MatchSessionCoordinator {
   constructor(
@@ -117,6 +123,82 @@ export class MatchSessionCoordinator {
     }
   }
 
+  async createAiRoom(input: Readonly<{
+    gameId: string;
+    profileId: string;
+    seriesTarget: number;
+    displayName: string;
+    opponentName: string;
+  }>): Promise<CreateRoomResolution> {
+    const reservation = await this.reserveSlot('creating');
+    if (!reservation) return { status: 'blocked', lock: this.storage.readLock() };
+    try {
+      const response = await this.api.createAiMatch(input);
+      if (!response.ok) {
+        this.storage.release(reservation);
+        return { status: 'rejected', body: response.body };
+      }
+      const { matchId, seatToken } = response.body;
+      if (typeof matchId !== 'string' || !/^[A-Za-z0-9_-]{22}$/.test(matchId) ||
+        typeof seatToken !== 'string' || seatToken.length === 0 || response.body.seat !== 'second') {
+        this.storage.release(reservation);
+        return { status: 'rejected', body: { error: 'invalid-response' } };
+      }
+      return { status: 'created', matchId, seatToken, inviteToken: null, listed: false };
+    } catch (error) {
+      this.storage.release(reservation);
+      throw error;
+    }
+  }
+
+  /** Replace a waiting human room while keeping a cross-tab reservation throughout. */
+  async switchWaitingRoomToAi(previous: ActiveMatch, input: Readonly<{
+    gameId: string;
+    profileId: string;
+    seriesTarget: number;
+    displayName: string;
+    opponentName: string;
+  }>): Promise<SwitchToAiResolution> {
+    const reservation = await this.storage.reserveWaitingReplacement(previous);
+    if (!reservation) return { status: 'blocked', lock: this.storage.readLock() };
+
+    try {
+      const cancelled = await this.api.cancelMatch(previous.matchId, previous.seatToken);
+      if (!cancelled.ok) {
+        const latest = await this.api.getMatch(previous.matchId, previous.seatToken);
+        if (latest.ok && !['cancelled', 'expired'].includes(String(latest.body.status))) {
+          this.storage.restoreWaitingReplacement(reservation, previous);
+          return { status: 'match-updated', match: latest.body };
+        }
+        this.storage.release(reservation);
+        this.storage.clearActiveMatch(previous.matchId);
+        return { status: 'rejected', message: 'The waiting room is no longer available.' };
+      }
+
+      const created = await this.api.createAiMatch(input);
+      if (!created.ok) {
+        this.storage.release(reservation);
+        return { status: 'rejected', message: 'The room was closed, but the new game could not be started. Return to games and try again.' };
+      }
+      const { matchId, seatToken } = created.body;
+      if (typeof matchId !== 'string' || !/^[A-Za-z0-9_-]{22}$/.test(matchId) ||
+        typeof seatToken !== 'string' || seatToken.length === 0 || created.body.seat !== 'second') {
+        this.storage.release(reservation);
+        return { status: 'rejected', message: 'The new game could not be started. Return to games and try again.' };
+      }
+      return { status: 'created', matchId, seatToken };
+    } catch {
+      const latest = await this.api.getMatch(previous.matchId, previous.seatToken).catch(() => null);
+      if (latest?.ok && ['cancelled', 'expired'].includes(String(latest.body.status))) {
+        this.storage.release(reservation);
+        this.storage.clearActiveMatch(previous.matchId);
+      } else {
+        this.storage.restoreWaitingReplacement(reservation, previous);
+      }
+      return { status: 'rejected', message: 'Could not switch matches. Check your connection and try again.' };
+    }
+  }
+
   async previewRoom(matchId: string, inviteToken: string | null, supportedGames: Readonly<Record<string, readonly number[]>>): Promise<Readonly<{
     status: 'available'; preview: MatchApiBody;
   }> | Readonly<{ status: 'unavailable'; code: string }>> {
@@ -170,7 +252,10 @@ export class MatchSessionCoordinator {
     }
     if (response.status === 409) {
       const latest = await this.api.getMatch(matchId, seatToken);
-      if (latest.ok && latest.body.status !== 'waiting') return { status: 'not-waiting', match: latest.body };
+      if (latest.ok && (latest.body.status !== 'waiting' ||
+        (Array.isArray(latest.body.playerNames) && typeof latest.body.playerNames[1] === 'string'))) {
+        return { status: 'not-waiting', match: latest.body };
+      }
     }
     return {
       status: 'rejected',

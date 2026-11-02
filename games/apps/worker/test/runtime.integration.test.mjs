@@ -115,7 +115,7 @@ function socketClient(baseUrl, matchId, seatToken) {
   return client;
 }
 
-function lobbySocketClient(baseUrl, visitorId) {
+function lobbySocketClient(baseUrl, visitorId = null) {
   const client = { socket: null, queue: [], waiters: [] };
   const socket = new WebSocket(`${baseUrl.replace(/^http/, "ws")}/v1/lobby/socket`, {
     headers: { Origin: origin },
@@ -158,7 +158,7 @@ function lobbySocketClient(baseUrl, visitorId) {
   };
   client.identify = async () => {
     await opened;
-    socket.send(JSON.stringify({ type: "identify", visitorId }));
+    socket.send(JSON.stringify({ type: "identify", ...(visitorId ? { visitorId } : {}) }));
     return client.waitFor((payload) => payload.type === "lobby-snapshot");
   };
   client.close = () => {
@@ -167,7 +167,7 @@ function lobbySocketClient(baseUrl, visitorId) {
   return client;
 }
 
-test("lobby presence changes are broadcast from socket events", { timeout: 30_000 }, async (t) => {
+test("lobby snapshots report available matches without visitor presence counts", { timeout: 30_000 }, async (t) => {
   const port = await unusedPort();
   const persistencePath = await mkdtemp(path.join(os.tmpdir(), "portfolio-games-lobby-"));
   let worker;
@@ -179,19 +179,17 @@ test("lobby presence changes are broadcast from socket events", { timeout: 30_00
   });
 
   worker = await startWorker(port, persistencePath);
-  const first = lobbySocketClient(worker.baseUrl, "A".repeat(22));
+  const first = lobbySocketClient(worker.baseUrl);
   clients.push(first);
-  assert.equal((await first.identify()).onlineCount, 1);
+  const firstSnapshot = await first.identify();
+  assert.equal(firstSnapshot.totalMatches, 0);
+  assert.equal("onlineCount" in firstSnapshot, false);
 
-  const firstSawSecond = first.waitFor((payload) => payload.type === "lobby-presence" && payload.onlineCount === 2);
   const second = lobbySocketClient(worker.baseUrl, "B".repeat(22));
   clients.push(second);
-  assert.equal((await second.identify()).onlineCount, 2);
-  await firstSawSecond;
-
-  const firstSawLeave = first.waitFor((payload) => payload.type === "lobby-presence" && payload.onlineCount === 1);
-  second.close();
-  await firstSawLeave;
+  const secondSnapshot = await second.identify();
+  assert.equal(secondSnapshot.totalMatches, 0);
+  assert.equal("onlineCount" in secondSnapshot, false);
 });
 
 test("competing joins can claim only one seat", { timeout: 30_000 }, async (t) => {
@@ -317,6 +315,98 @@ test("two concurrent moves from one seat produce one accepted action", { timeout
     headers: { Authorization: `Bearer ${created.body.seatToken}` },
   });
   assert.equal(snapshot.body.state.moves.length, 1);
+});
+
+test("AI matches start on demand and make a server-authoritative reply in the same turn flow", { timeout: 30_000 }, async (t) => {
+  const port = await unusedPort();
+  const persistencePath = await mkdtemp(path.join(os.tmpdir(), "portfolio-games-ai-match-"));
+  let worker;
+  const clients = [];
+  t.after(async () => {
+    clients.forEach((client) => client.close());
+    if (worker) await stopWorker(worker.process);
+    await rm(persistencePath, { recursive: true, force: true });
+  });
+
+  worker = await startWorker(port, persistencePath);
+  const unsupportedGame = await api(worker.baseUrl, "/v1/matches/ai", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ gameId: "unregistered-game", profileId: "standard", seriesTarget: 1, displayName: "Test Player" }),
+  });
+  assert.equal(unsupportedGame.response.status, 404);
+  const unsupportedProfile = await api(worker.baseUrl, "/v1/matches/ai", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ gameId: "connect-four", profileId: "unregistered-profile", seriesTarget: 1, displayName: "Test Player" }),
+  });
+  assert.equal(unsupportedProfile.response.status, 400);
+  const created = await api(worker.baseUrl, "/v1/matches/ai", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ gameId: "connect-four", profileId: "standard", seriesTarget: 1, displayName: "Test Player" }),
+  });
+  assert.equal(created.response.status, 201);
+  assert.equal(created.body.seat, "second");
+
+  const client = socketClient(worker.baseUrl, created.body.matchId, created.body.seatToken);
+  clients.push(client);
+  await client.openAndAuthenticate();
+  const activeEvent = await client.waitFor((payload) => payload.type === "match" && payload.match.status === "active" && payload.match.state !== null);
+  let active = activeEvent.match;
+  if (active.awaitingTurnReceipt?.seat === "second") {
+    client.send({ type: "turn-received", revision: active.revision });
+    active = (await client.waitFor((payload) => payload.type === "match" && payload.match.status === "active" && payload.match.turnDeadline !== null)).match;
+  }
+  assert.ok(active.state.moves.length === 0 || active.state.moves.length === 1);
+  assert.equal(active.state.nextPlayer, "second");
+
+  const accepted = client.waitFor((payload) => payload.acceptedActionId === "human-first-move");
+  client.send({
+    protocolVersion: 1, type: "submit-action", gameId: "connect-four", rulesVersion: RULES_VERSION,
+    matchId: created.body.matchId, actionId: "human-first-move", expectedRevision: active.revision,
+    action: { type: "drop-token", column: 3 },
+  });
+  const response = await accepted;
+  assert.equal(response.match.status, "active");
+  assert.equal(response.match.state.moves.length, active.state.moves.length + 2);
+  assert.equal(response.match.state.nextPlayer, "second");
+  assert.equal(response.match.seatKinds[0], "ai");
+  assert.equal(response.match.seatKinds[1], "human");
+});
+
+test("AI opponent accepts a rematch and starts the next game without another player seat", { timeout: 30_000 }, async (t) => {
+  const port = await unusedPort();
+  const persistencePath = await mkdtemp(path.join(os.tmpdir(), "portfolio-games-ai-rematch-"));
+  let worker;
+  const clients = [];
+  t.after(async () => {
+    clients.forEach((client) => client.close());
+    if (worker) await stopWorker(worker.process);
+    await rm(persistencePath, { recursive: true, force: true });
+  });
+
+  worker = await startWorker(port, persistencePath);
+  const created = await api(worker.baseUrl, "/v1/matches/ai", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ gameId: "connect-four", profileId: "standard", seriesTarget: 1, displayName: "Test Player" }),
+  });
+  assert.equal(created.response.status, 201);
+
+  const client = socketClient(worker.baseUrl, created.body.matchId, created.body.seatToken);
+  clients.push(client);
+  await client.openAndAuthenticate();
+  await client.waitFor((payload) => payload.type === "match" && payload.match.status === "active" && payload.match.state !== null);
+
+  const completed = client.waitFor((payload) => payload.type === "match" && payload.match.status === "completed");
+  client.send({ type: "resign" });
+  const result = await completed;
+  assert.equal(result.match.seriesWinner, "first");
+
+  const countdown = client.waitFor((payload) => payload.type === "match" && payload.match.status === "countdown" && payload.match.rematchCountdown === true);
+  client.send({ type: "rematch" });
+  await countdown;
+  const restarted = await client.waitFor((payload) => payload.type === "match" && payload.match.status === "active" &&
+    payload.match.gameNumber === 1 && payload.match.revision > result.match.revision);
+  assert.ok(restarted.match.state.moves.length === 0 || restarted.match.state.moves.length === 1);
+  assert.equal(restarted.match.state.nextPlayer, "second");
 });
 
 test("replacing a live player's socket preserves the seat and allows the current turn", { timeout: 60_000 }, async (t) => {

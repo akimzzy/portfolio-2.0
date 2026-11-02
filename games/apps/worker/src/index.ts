@@ -1,6 +1,7 @@
 import { invalid, isMatchReactionId, normalizeQuickMessage, parseActionCommand } from "@portfolio-games/contracts";
 import type { ActionCommand, PlayerSeat, RuntimeTwoPlayerGame, ValidationResult } from "@portfolio-games/contracts";
 import { workerGames } from "./games/registry.js";
+import { opponentProviderForGame, opponentProviderForVersion } from "./games/opponents.js";
 
 const DEFAULT_TURN_DURATION_MS = 45_000;
 const DEFAULT_RECONNECT_DURATION_MS = 60_000;
@@ -22,7 +23,7 @@ type Visibility = "public" | "invite";
 type GameId = string;
 const SUPPORTED_GAME_IDS = workerGames.entries.map((game) => game.gameId);
 type Status = "waiting" | "countdown" | "active" | "between-games" | "completed" | "cancelled" | "expired";
-type Seat = { tokenHash: string; displayName?: string; connected: boolean; reconnectRemainingMs: number; disconnectedAt: number | null; turnReceiptSupported?: boolean };
+type Seat = { tokenHash: string | null; kind?: "human" | "ai"; aiProfileId?: string; displayName?: string; connected: boolean; reconnectRemainingMs: number; disconnectedAt: number | null; turnReceiptSupported?: boolean };
 type Match = {
   id: string; gameId: GameId; rulesVersion: number; visibility: Visibility; status: Status; createdAt: number; expiresAt: number;
   retentionDeadline?: number | null;
@@ -37,13 +38,14 @@ type Match = {
   seriesStartingSeat: PlayerSeat | null; nextStartingSeat: PlayerSeat | null;
   nextReady: [boolean, boolean]; rematchReady: [boolean, boolean]; closedSeats: [boolean, boolean];
   rematchCountdown: boolean; seriesWinner: PlayerSeat | null;
+  aiSeed?: number | null;
+  aiEngineVersion?: number | null;
 };
 type LobbyEntry = Readonly<{
   matchId: string; gameId: GameId; displayName: string; seriesTarget: 1 | 2 | 3; createdAt: number; expiresAt: number;
 }>;
 type SocketAttachment = { authenticated: false; authDeadline: number } | {
-  authenticated: true; seat: PlayerSeat; visitorId?: string; presenceSessionId?: string; lastSyncAt?: number;
-  reactionTimes?: number[]; presenceTouchedAt?: number;
+  authenticated: true; seat: PlayerSeat; lastSyncAt?: number; reactionTimes?: number[];
 };
 
 function gameForMatch(match: Pick<Match, 'gameId' | 'rulesVersion'>): RuntimeTwoPlayerGame | null {
@@ -146,12 +148,27 @@ function normalizeDisplayName(value: unknown, matchId: string, seatIndex: number
 function displayNameKey(value: string): string {
   return value.normalize('NFKC').replace(/\s+/g, ' ').trim().toLowerCase();
 }
+function uniqueGeneratedDisplayName(matchId: string, seatIndex: number, otherNames: readonly string[]): string {
+  for (let variant = 0; variant < 32; variant += 1) {
+    const candidate = fallbackDisplayName(matchId, seatIndex + variant);
+    if (!otherNames.some((name) => displayNameKey(name) === displayNameKey(candidate))) return candidate;
+  }
+  const base = fallbackDisplayName(matchId, seatIndex);
+  let suffix = 2;
+  let candidate = `${base} ${suffix}`;
+  while (otherNames.some((name) => displayNameKey(name) === displayNameKey(candidate))) {
+    suffix += 1;
+    candidate = `${base} ${suffix}`;
+  }
+  return candidate;
+}
 function snapshot(match: Match) {
   const now = Date.now();
   return {
     matchId: match.id, gameId: match.gameId, rulesVersion: match.rulesVersion, visibility: match.visibility, status: match.status, revision: match.revision,
     state: match.state, connectedSeats: match.seats.map((seat) => Boolean(seat?.connected)),
     playerNames: match.seats.map((seat) => seat?.displayName ?? null),
+    seatKinds: match.seats.map((seat) => seat?.kind ?? "human"),
     countdownAt: match.countdownAt, turnDeadline: match.turnDeadline, nextGameDeadline: match.nextGameDeadline, outcome: match.outcome,
     expiresAt: match.expiresAt, serverNow: Date.now(), seriesTarget: match.seriesTarget,
     bestOf: match.seriesTarget * 2 - 1, wins: match.wins, gameNumber: match.gameNumber,
@@ -199,7 +216,14 @@ function normalizeMatch(match: Match): Match {
     gameId: typeof match.gameId === "string" ? match.gameId : "connect-four",
     rulesVersion: Number.isSafeInteger(match.rulesVersion) && match.rulesVersion > 0 ? match.rulesVersion : 1,
     seats: match.seats.map((seat, index) => seat ? {
-      ...seat, displayName: normalizeDisplayName(seat.displayName, match.id, index),
+      ...seat, kind: seat.kind === "ai" ? "ai" : "human",
+      ...(seat.kind === "ai" ? {
+        aiProfileId: opponentProviderForGame(match.gameId)?.supportsProfile(seat.aiProfileId)
+          ? seat.aiProfileId
+          : opponentProviderForGame(match.gameId)?.defaultProfileId ?? "standard",
+      } : {}),
+      tokenHash: typeof seat.tokenHash === "string" ? seat.tokenHash : null,
+      displayName: normalizeDisplayName(seat.displayName, match.id, index),
     } : null) as Match['seats'],
     seriesTarget: target, wins, gameNumber: Number.isSafeInteger(match.gameNumber) ? match.gameNumber : 1,
     nextGameDeadline: Number.isFinite(match.nextGameDeadline)
@@ -246,6 +270,12 @@ function normalizeMatch(match: Match): Match {
     }
   }
   if (normalized.status === "countdown" && normalized.countdownAt === null) normalized.countdownAt = now + COUNTDOWN_MS;
+  normalized.aiSeed = typeof normalized.aiSeed === "number" && Number.isSafeInteger(normalized.aiSeed) ? normalized.aiSeed : null;
+  normalized.aiEngineVersion = normalized.seats.some((seat) => seat?.kind === "ai")
+    ? typeof normalized.aiEngineVersion === "number" && Number.isSafeInteger(normalized.aiEngineVersion)
+      ? normalized.aiEngineVersion
+      : opponentProviderForGame(normalized.gameId)?.currentEngineVersion ?? null
+    : null;
   return normalized;
 }
 function timerStateNeedsPersistence(original: Match, normalized: Match): boolean {
@@ -281,7 +311,7 @@ export default {
       return json(await response.json(), 200, headers);
     }
 
-    if ((request.method === "POST" && (url.pathname === "/v1/matches" || /^\/v1\/matches\/[A-Za-z0-9_-]{22}\/(?:join|preview)$/.test(url.pathname)))) {
+    if ((request.method === "POST" && (url.pathname === "/v1/matches" || url.pathname === "/v1/matches/ai" || /^\/v1\/matches\/[A-Za-z0-9_-]{22}\/(?:join|preview)$/.test(url.pathname)))) {
       const source = request.headers.get("cf-connecting-ip") ?? "local-development";
       const { success } = await env.ROOMS_RATE_LIMITER.limit({ key: `room-operations:${source}` });
       if (!success) return json({ error: "rate-limited", message: "Too many game room requests. Wait a moment and try again." }, 429, { ...headers, "Retry-After": "60" });
@@ -337,6 +367,50 @@ export default {
         } catch { listed = false; }
       }
       return json({ matchId: id, gameId, visibility, seat: "first", seatToken, inviteToken, status: "waiting", expiresAt: match.expiresAt, seriesTarget, listed }, 201, headers);
+    }
+
+    if (url.pathname === "/v1/matches/ai" && request.method === "POST") {
+      const input = await body(request);
+      if (!input || typeof input !== "object" || Array.isArray(input)) return json({ error: "invalid-request" }, 400, headers);
+      const values = input as Record<string, unknown>;
+      const gameId = typeof values.gameId === "string" ? values.gameId : "";
+      const game = workerGames.get(gameId);
+      const opponentProvider = opponentProviderForGame(gameId);
+      if (!game || !opponentProvider) return json({ error: "unsupported-game" }, 404, headers);
+      if (!opponentProvider.supportsProfile(values.profileId)) return json({ error: "unsupported-opponent" }, 400, headers);
+      const seriesTarget = values.seriesTarget;
+      if (seriesTarget !== 1 && seriesTarget !== 2 && seriesTarget !== 3) return json({ error: "invalid-series-target" }, 400, headers);
+      const id = createId();
+      const seatToken = token();
+      const now = Date.now();
+      const seedBytes = crypto.getRandomValues(new Uint32Array(1));
+      const aiSeed = seedBytes[0] ?? 1;
+      const humanName = normalizeDisplayName(values.displayName, id, 1);
+      const requestedAiName = normalizeDisplayName(values.opponentName, id, 0);
+      const aiName = displayNameKey(requestedAiName) === displayNameKey(humanName)
+        ? uniqueGeneratedDisplayName(id, 1, [humanName])
+        : requestedAiName;
+      const policy = game.getSessionPolicy(game.rulesVersion);
+      const match: Match = {
+        id, gameId: game.gameId, rulesVersion: game.rulesVersion, visibility: "public", status: "waiting", createdAt: now,
+        retentionDeadline: null, expiresAt: now + ROOM_TTL_MS, revision: 0, state: null,
+        seats: [
+          { tokenHash: null, kind: "ai", aiProfileId: values.profileId, displayName: aiName, connected: true, reconnectRemainingMs: policy.reconnectDurationMs, disconnectedAt: null },
+          { tokenHash: await hash(seatToken), kind: "human", displayName: humanName, connected: false, reconnectRemainingMs: policy.reconnectDurationMs, disconnectedAt: null },
+        ],
+        countdownAt: null, turnDeadline: null, turnStartedAt: null, nextGameDeadline: null,
+        reconnectSeat: null, reconnectDeadline: null, pausedTurnMs: null, turnReceiptPending: false, turnReceiptStartedAt: null, outcome: null,
+        recentActions: {}, actionTimes: [[], []], seriesTarget, wins: { first: 0, second: 0 }, gameNumber: 0,
+        seriesStartingSeat: null, nextStartingSeat: null, nextReady: [false, false], rematchReady: [false, false],
+        closedSeats: [false, false], rematchCountdown: false, seriesWinner: null,
+        aiSeed, aiEngineVersion: opponentProvider.currentEngineVersion,
+      };
+      const stub = env.MATCHES.get(env.MATCHES.idFromName(id));
+      const created = await stub.fetch(new Request("https://match.internal/create", {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ match }),
+      }));
+      if (!created.ok) return json({ error: "match-create-failed" }, 503, headers);
+      return json({ matchId: id, gameId: game.gameId, visibility: "public", seat: "second", seatToken, status: "waiting", expiresAt: match.expiresAt, seriesTarget }, 201, headers);
     }
 
     const route = url.pathname.match(/^\/v1\/matches\/([A-Za-z0-9_-]{22})(?:\/(join|preview|socket|resign|cancel|leave|leave-series))?$/);
@@ -539,7 +613,7 @@ export class MatchDurableObject {
     const tokenHash = await hash(credential);
     const index = match.seats.findIndex((seat) => seat?.tokenHash === tokenHash);
     if (index !== 0) return json({ error: "forbidden" }, 403);
-    if (match.status !== "waiting") return json({ error: "room-not-waiting" }, 409);
+    if (match.status !== "waiting" || match.seats[1]) return json({ error: match.seats[1] ? "room-full" : "room-not-waiting", match: snapshot(match) }, 409);
     match.status = "cancelled";
     match.outcome = "room-cancelled";
     match.retentionDeadline = Date.now() + TERMINAL_MATCH_RETENTION_MS;
@@ -558,6 +632,16 @@ export class MatchDurableObject {
     const index = match.seats.findIndex((seat) => seat?.tokenHash === tokenHash);
     if (index !== 1) return json({ error: "forbidden" }, 403);
     if (match.status !== "waiting") return json({ error: "room-not-waiting" }, 409);
+
+    if (match.seats[0]?.kind === "ai") {
+      match.status = "cancelled";
+      match.outcome = "ai-match-left-before-start";
+      match.retentionDeadline = Date.now() + TERMINAL_MATCH_RETENTION_MS;
+      match.closedSeats[1] = true;
+      match.revision += 1;
+      await this.publish(match);
+      return json({ match: snapshot(match) });
+    }
 
     match.seats[1] = null;
     match.revision += 1;
@@ -630,7 +714,7 @@ export class MatchDurableObject {
       const authMessage = message as Record<string, unknown> | null;
       if (!authMessage || authMessage.type !== "authenticate" || typeof authMessage.seatToken !== "string" ||
         (authMessage.supportsTurnReceipt !== undefined && typeof authMessage.supportsTurnReceipt !== "boolean") ||
-        (authMessage.visitorId !== undefined && (typeof authMessage.visitorId !== "string" || !/^[A-Za-z0-9_-]{22}$/.test(authMessage.visitorId))) || Date.now() > attachment.authDeadline) {
+        Date.now() > attachment.authDeadline) {
         socket.close(1008, "Authentication required"); return;
       }
       const tokenHash = await hash(authMessage.seatToken);
@@ -696,9 +780,7 @@ export class MatchDurableObject {
       if (match.revision === revisionBeforeAuthentication && !wasConnected) match.revision += 1;
       await this.save(match);
       await this.schedule(match);
-      const visitorId = typeof authMessage.visitorId === "string" ? authMessage.visitorId : token(16);
-      const presenceSessionId = token(16);
-      socket.serializeAttachment?.({ authenticated: true, seat, visitorId, presenceSessionId } satisfies SocketAttachment);
+      socket.serializeAttachment?.({ authenticated: true, seat } satisfies SocketAttachment);
       this.broadcast({ type: "match", match: snapshot(match) });
       socket.send(JSON.stringify({ type: "match", match: snapshot(match) }));
       return;
@@ -783,6 +865,10 @@ export class MatchDurableObject {
         socket.send(JSON.stringify({ type: isReaction ? "reaction-rejected" : "quick-message-rejected", code: "match-not-active" }));
         return;
       }
+      if (match.seats.some((seat) => seat?.kind === "ai")) {
+        socket.send(JSON.stringify({ type: isReaction ? "reaction-rejected" : "quick-message-rejected", code: "social-unavailable" }));
+        return;
+      }
       const now = Date.now();
       const reactionTimes = (attachment.reactionTimes ?? []).filter((at) => now - at < 10_000);
       const lastReactionAt = reactionTimes.at(-1) ?? 0;
@@ -792,8 +878,8 @@ export class MatchDurableObject {
       }
       reactionTimes.push(now);
       socket.serializeAttachment?.({ ...attachment, reactionTimes } satisfies SocketAttachment);
-      if (isReaction) this.broadcast({ type: "reaction", eventId: token(12), seat: attachment.seat, reactionId }, false);
-      else this.broadcast({ type: "quick-message", eventId: token(12), seat: attachment.seat, message: text }, false);
+      if (isReaction) this.broadcast({ type: "reaction", eventId: token(12), seat: attachment.seat, reactionId });
+      else this.broadcast({ type: "quick-message", eventId: token(12), seat: attachment.seat, message: text });
       return;
     }
     if (message.type === "resign") {
@@ -889,6 +975,7 @@ export class MatchDurableObject {
         }
       }
     }
+    this.applyAiTurn(match, now);
     const event = { type: "match", match: snapshot(match), acceptedActionId: command.actionId };
     match.recentActions[command.actionId] = event;
     const actionIds = Object.keys(match.recentActions);
@@ -901,9 +988,6 @@ export class MatchDurableObject {
   async webSocketClose(socket: WebSocket): Promise<void> {
     const attachment = socket.deserializeAttachment?.() as SocketAttachment | null;
     if (!attachment?.authenticated) return;
-    if (attachment.visitorId && attachment.presenceSessionId) {
-      this.ctx.waitUntil(this.removeMatchPresence(attachment.visitorId, attachment.presenceSessionId));
-    }
     const hasReplacement = this.ctx.getWebSockets().some((candidate) => {
       if (candidate === socket) return false;
       const candidateAttachment = candidate.deserializeAttachment?.() as SocketAttachment | null;
@@ -1002,6 +1086,7 @@ export class MatchDurableObject {
           match.turnStartedAt = now;
           match.turnDeadline = now + sessionPolicy(match).turnDurationMs;
         }
+        this.applyAiTurn(match, now);
       } else {
         match.status = match.rematchCountdown ? "completed" : match.gameNumber > 0 ? "between-games" : "waiting";
         match.retentionDeadline = match.status === "completed" ? now + TERMINAL_MATCH_RETENTION_MS : null;
@@ -1089,6 +1174,60 @@ export class MatchDurableObject {
     match.nextGameDeadline = match.seriesWinner ? null : Date.now() + NEXT_GAME_TIMEOUT_MS;
     match.nextReady = [false, false];
     match.rematchReady = [false, false];
+    if (match.status === "between-games") {
+      const aiIndex = match.seats.findIndex((seat) => seat?.kind === "ai");
+      if (aiIndex >= 0) match.nextReady[aiIndex] = true;
+    }
+  }
+
+  /** Run the virtual seat synchronously in the same authoritative request/alarm. */
+  private applyAiTurn(match: Match, now: number): void {
+    if (match.status !== "active" || match.state === null || !Number.isSafeInteger(match.aiEngineVersion)) return;
+    const nextSeat = stateNextPlayer(match);
+    if (!nextSeat) return;
+    const aiIndex = match.seats.findIndex((seat) => seat?.kind === "ai");
+    const ai = match.seats[aiIndex];
+    if (aiIndex < 0 || !ai?.aiProfileId || (aiIndex === 0 ? "first" : "second") !== nextSeat) return;
+    const opponent = opponentProviderForVersion(match.gameId, match.aiEngineVersion!);
+    if (!opponent || !opponent.supportsProfile(ai.aiProfileId)) return;
+    const game = gameForMatch(match);
+    if (!game || !game.inspectState(match.state, match.rulesVersion).ok) return;
+
+    const action = opponent.chooseAction(match.state, nextSeat, ai.aiProfileId, match.aiSeed ?? 1, match.aiEngineVersion!);
+    const applied = game.applyAction(match.state, nextSeat, action, match.rulesVersion);
+    if (!applied.ok) return;
+    const inspected = game.inspectState(applied.value, match.rulesVersion);
+    if (!inspected.ok) return;
+    match.state = applied.value;
+    match.revision += 1;
+    if (inspected.value.outcome) {
+      const result = inspected.value.outcome.kind === "draw" ? "draw" : `win-${inspected.value.outcome.winner}`;
+      this.applyGameOutcome(match, result);
+      return;
+    }
+
+    const humanTurn = inspected.value.nextPlayer;
+    const humanIndex = humanTurn === "first" ? 0 : 1;
+    const human = match.seats[humanIndex];
+    if (!humanTurn || !human || human.kind === "ai") return;
+    if (human.turnReceiptSupported) {
+      match.reconnectSeat = humanTurn;
+      match.reconnectDeadline = now + human.reconnectRemainingMs;
+      match.pausedTurnMs = sessionPolicy(match).turnDurationMs;
+      match.turnDeadline = null;
+      match.turnStartedAt = null;
+      match.turnReceiptPending = true;
+      match.turnReceiptStartedAt = now;
+      if (!human.connected) human.disconnectedAt ??= now;
+    } else {
+      match.reconnectSeat = null;
+      match.reconnectDeadline = null;
+      match.pausedTurnMs = null;
+      match.turnReceiptPending = false;
+      match.turnReceiptStartedAt = null;
+      match.turnStartedAt = now;
+      match.turnDeadline = now + sessionPolicy(match).turnDurationMs;
+    }
   }
 
   private async requestNextGame(match: Match, seat: PlayerSeat): Promise<void> {
@@ -1103,6 +1242,8 @@ export class MatchDurableObject {
     const index = seat === "first" ? 0 : 1;
     if (match.nextReady[index]) return;
     match.nextReady[index] = true;
+    const aiIndex = match.seats.findIndex((entry) => entry?.kind === "ai");
+    if (aiIndex >= 0) match.nextReady[aiIndex] = true;
     if (match.nextReady.every(Boolean) && match.seats.every((entry) => entry?.connected)) {
       this.beginNextGameCountdown(match, now);
     }
@@ -1124,6 +1265,8 @@ export class MatchDurableObject {
     const index = seat === "first" ? 0 : 1;
     if (match.rematchReady[index]) return;
     match.rematchReady[index] = true;
+    const aiIndex = match.seats.findIndex((entry) => entry?.kind === "ai");
+    if (aiIndex >= 0) match.rematchReady[aiIndex] = true;
     if (match.rematchReady.every(Boolean)) {
       const previousStarter = match.seriesStartingSeat ?? stateStartingPlayer(match) ?? "first";
       match.nextStartingSeat = otherSeat(previousStarter);
@@ -1233,43 +1376,7 @@ export class MatchDurableObject {
     } catch { /* The room remains authoritative; stale directory entries expire independently. */ }
   }
 
-  private async removeMatchPresence(visitorId: string, sessionId: string): Promise<void> {
-    try {
-      const hub = this.env.LOBBY_HUB.get(this.env.LOBBY_HUB.idFromName("lobby:global"));
-      await hub.fetch(new Request("https://lobby-hub.internal/presence/leave", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ visitorId, sessionId }),
-      }));
-    } catch { /* Presence entries expire automatically if cleanup cannot be delivered. */ }
-  }
-
-  private async refreshMatchPresence(): Promise<void> {
-    const now = Date.now();
-    const touchedSockets: { socket: WebSocket; attachment: Extract<SocketAttachment, { authenticated: true }> }[] = [];
-    const sessions = this.ctx.getWebSockets().flatMap((socket) => {
-      const attachment = socket.deserializeAttachment?.() as SocketAttachment | null;
-      if (!attachment?.authenticated || !attachment.visitorId || !attachment.presenceSessionId ||
-        (Number.isFinite(attachment.presenceTouchedAt) && now - attachment.presenceTouchedAt! < MATCH_PRESENCE_REFRESH_MS)) return [];
-      const updated = { ...attachment, presenceTouchedAt: now } satisfies SocketAttachment;
-      socket.serializeAttachment?.(updated);
-      touchedSockets.push({ socket, attachment });
-      return [{ visitorId: attachment.visitorId, sessionId: attachment.presenceSessionId }];
-    });
-    if (!sessions.length) return;
-    try {
-      const hub = this.env.LOBBY_HUB.get(this.env.LOBBY_HUB.idFromName("lobby:global"));
-      const response = await hub.fetch(new Request("https://lobby-hub.internal/presence/touch", {
-        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sessions }),
-      }));
-      if (response.ok) return;
-    } catch { /* Presence is advisory; it never changes match authority. */ }
-    for (const { socket, attachment } of touchedSockets) {
-      socket.serializeAttachment?.({ ...attachment, presenceTouchedAt: 0 } satisfies SocketAttachment);
-    }
-  }
-
-  private broadcast(event: unknown, refreshPresence = true): void {
-    if (refreshPresence) this.ctx.waitUntil(this.refreshMatchPresence());
+  private broadcast(event: unknown): void {
     const message = JSON.stringify(event);
     for (const socket of this.ctx.getWebSockets()) {
       const attachment = socket.deserializeAttachment?.() as SocketAttachment | null;
@@ -1278,13 +1385,10 @@ export class MatchDurableObject {
   }
 }
 
-type LobbySocketAttachment = { visitorId: string; gameId: GameId | null; identified: boolean };
-type MatchPresenceSession = { visitorId: string; sessionId: string; expiresAt: number };
+type LobbySocketAttachment = { gameId: GameId | null; identified: boolean };
 const LOBBY_PAGE_SIZE = 20;
-const MATCH_PRESENCE_TTL_MS = 5 * 60_000;
-const MATCH_PRESENCE_REFRESH_MS = 4 * 60_000;
 
-/** Event-driven, cross-game lobby feed and approximate active-browser presence. */
+/** Event-driven, cross-game lobby feed for joinable human-created rooms. */
 export class LobbyHubDurableObject {
   constructor(private readonly ctx: DurableObjectState, _env: WorkerEnv) {
     this.ctx.storage.sql.exec(`
@@ -1299,13 +1403,6 @@ export class LobbyHubDurableObject {
       CREATE INDEX IF NOT EXISTS lobby_rooms_created ON public_rooms (created_at DESC, match_id ASC);
       CREATE INDEX IF NOT EXISTS lobby_rooms_game_created ON public_rooms (game_id, created_at DESC, match_id ASC);
       CREATE INDEX IF NOT EXISTS lobby_rooms_expiry ON public_rooms (expires_at);
-      CREATE TABLE IF NOT EXISTS match_presence (
-        session_id TEXT PRIMARY KEY,
-        visitor_id TEXT NOT NULL,
-        expires_at INTEGER NOT NULL
-      );
-      CREATE INDEX IF NOT EXISTS match_presence_expiry ON match_presence (expires_at);
-      CREATE INDEX IF NOT EXISTS match_presence_visitor ON match_presence (visitor_id, expires_at);
     `);
   }
 
@@ -1318,7 +1415,7 @@ export class LobbyHubDurableObject {
       const pair = new WebSocketPair();
       const [client, server] = Object.values(pair);
       this.ctx.acceptWebSocket(server, ["lobby"]);
-      server.serializeAttachment?.({ visitorId: token(16), gameId: requestedGame as GameId | null, identified: false });
+      server.serializeAttachment?.({ gameId: requestedGame as GameId | null, identified: false });
       return new Response(null, { status: 101, webSocket: client });
     }
     if (operation === "upsert" && request.method === "POST") {
@@ -1342,37 +1439,6 @@ export class LobbyHubDurableObject {
       this.broadcastRoom({ type: "lobby-room-upsert", match: entry as LobbyEntry });
       return json({ ok: true }, 201);
     }
-    if (operation === "presence" && request.method === "POST") {
-      const input = await body(request);
-      if (!input || typeof input !== "object" || Array.isArray(input)) return json({ error: "invalid-request" }, 400);
-      if (url.pathname.endsWith("/touch")) {
-        const sessions = (input as { sessions?: unknown }).sessions;
-        if (!Array.isArray(sessions) || sessions.length > 2 || sessions.some((value) => {
-          if (!value || typeof value !== "object" || Array.isArray(value)) return true;
-          const session = value as Partial<MatchPresenceSession>;
-          return typeof session.visitorId !== "string" || !/^[A-Za-z0-9_-]{22}$/.test(session.visitorId) ||
-            typeof session.sessionId !== "string" || !/^[A-Za-z0-9_-]{22}$/.test(session.sessionId);
-        })) return json({ error: "invalid-presence" }, 400);
-        const expiresAt = Date.now() + MATCH_PRESENCE_TTL_MS;
-        for (const value of sessions as MatchPresenceSession[]) {
-          this.ctx.storage.sql.exec(`
-            INSERT INTO match_presence (session_id, visitor_id, expires_at) VALUES (?, ?, ?)
-            ON CONFLICT(session_id) DO UPDATE SET visitor_id = excluded.visitor_id, expires_at = excluded.expires_at
-          `, value.sessionId, value.visitorId, expiresAt);
-        }
-        await this.schedule();
-        return json({ ok: true });
-      }
-      const presence = input as Partial<MatchPresenceSession>;
-      if (typeof presence.visitorId !== "string" || !/^[A-Za-z0-9_-]{22}$/.test(presence.visitorId) ||
-        typeof presence.sessionId !== "string" || !/^[A-Za-z0-9_-]{22}$/.test(presence.sessionId)) return json({ error: "invalid-presence" }, 400);
-      if (url.pathname.endsWith("/leave")) {
-        this.ctx.storage.sql.exec("DELETE FROM match_presence WHERE session_id = ? AND visitor_id = ?", presence.sessionId, presence.visitorId);
-      } else return json({ error: "not-found" }, 404);
-      await this.schedule();
-      this.broadcastPresence();
-      return json({ ok: true });
-    }
     if (operation === "remove" && request.method === "POST") {
       const matchId = url.searchParams.get("matchId");
       if (!matchId || !ID_PATTERN.test(matchId)) return json({ error: "invalid-match-id" }, 400);
@@ -1388,7 +1454,7 @@ export class LobbyHubDurableObject {
       const cursor = url.searchParams.get("cursor");
       if (cursor && !/^\d{13}\.[A-Za-z0-9_-]{22}$/.test(cursor)) return json({ error: "invalid-cursor" }, 400);
       const result = this.page(gameId as GameId | null, cursor, LOBBY_PAGE_SIZE);
-      return json({ ...result, onlineCount: this.onlineCount(), serverNow: Date.now() });
+      return json({ ...result, serverNow: Date.now() });
     }
     return json({ error: "not-found" }, 404);
   }
@@ -1405,7 +1471,7 @@ export class LobbyHubDurableObject {
     if (!attachment) return;
     if (!attachment.identified) {
       if (message.type !== "identify" || Object.keys(message).some((key) => !["type", "visitorId", "gameId"].includes(key)) ||
-        typeof message.visitorId !== "string" || !/^[A-Za-z0-9_-]{22}$/.test(message.visitorId)) {
+        (message.visitorId !== undefined && (typeof message.visitorId !== "string" || !/^[A-Za-z0-9_-]{22}$/.test(message.visitorId)))) {
         socket.close(1008, "Invalid lobby session");
         return;
       }
@@ -1414,10 +1480,9 @@ export class LobbyHubDurableObject {
         socket.close(1008, "Invalid game filter");
         return;
       }
-      const identified = { ...attachment, visitorId: message.visitorId, gameId: gameId as GameId | null, identified: true };
+      const identified = { ...attachment, gameId: gameId as GameId | null, identified: true };
       socket.serializeAttachment?.(identified);
       this.sendSnapshot(socket, identified.gameId, null);
-      this.broadcastPresence();
       return;
     }
     if (Object.keys(message).some((key) => !["type", "gameId", "cursor"].includes(key))) return;
@@ -1436,15 +1501,6 @@ export class LobbyHubDurableObject {
       if (typeof cursor !== "string" || !/^\d{13}\.[A-Za-z0-9_-]{22}$/.test(cursor)) return;
       this.sendSnapshot(socket, attachment.gameId, cursor, "lobby-page");
     }
-  }
-
-  webSocketClose(socket: WebSocket): void {
-    const attachment = socket.deserializeAttachment?.() as LobbySocketAttachment | null;
-    if (attachment?.identified) this.broadcastPresence(socket);
-  }
-  webSocketError(socket: WebSocket): void {
-    const attachment = socket.deserializeAttachment?.() as LobbySocketAttachment | null;
-    if (attachment?.identified) this.broadcastPresence(socket);
   }
 
   async alarm(): Promise<void> {
@@ -1466,8 +1522,6 @@ export class LobbyHubDurableObject {
         try { socket.send(JSON.stringify({ type: "lobby-rooms-remove", matchIds: removed, totalMatches })); } catch { socket.close(1011, "Send failed"); }
       }
     }
-    const expiredPresence = this.ctx.storage.sql.exec("DELETE FROM match_presence WHERE expires_at <= ?", now).rowsWritten > 0;
-    if (expiredPresence) this.broadcastPresence();
     await this.schedule();
   }
 
@@ -1505,7 +1559,7 @@ export class LobbyHubDurableObject {
 
   private sendSnapshot(socket: WebSocket, gameId: GameId | null, cursor: string | null, type = "lobby-snapshot"): void {
     const page = this.page(gameId, cursor, LOBBY_PAGE_SIZE);
-    try { socket.send(JSON.stringify({ type, ...page, onlineCount: this.onlineCount(), serverNow: Date.now() })); }
+    try { socket.send(JSON.stringify({ type, ...page, serverNow: Date.now() })); }
     catch { socket.close(1011, "Send failed"); }
   }
 
@@ -1514,20 +1568,6 @@ export class LobbyHubDurableObject {
       "SELECT game_id AS gameId, COUNT(*) AS total FROM public_rooms WHERE expires_at > ? GROUP BY game_id", Date.now(),
     ).toArray();
     return Object.fromEntries(rows.map((row) => [row.gameId, row.total]));
-  }
-
-  private onlineCount(excluding?: WebSocket): number {
-    const visitors = new Set<string>();
-    for (const socket of this.ctx.getWebSockets("lobby")) {
-      if (socket === excluding) continue;
-      const attachment = socket.deserializeAttachment?.() as LobbySocketAttachment | null;
-      if (attachment?.identified && attachment.visitorId) visitors.add(attachment.visitorId);
-    }
-    const matchVisitors = this.ctx.storage.sql.exec<{ visitorId: string }>(
-      "SELECT DISTINCT visitor_id AS visitorId FROM match_presence WHERE expires_at > ?", Date.now(),
-    ).toArray();
-    for (const visitor of matchVisitors) visitors.add(visitor.visitorId);
-    return visitors.size;
   }
 
   private broadcastRoom(event: { type: "lobby-room-upsert"; match: LobbyEntry } | { type: "lobby-room-remove"; matchId: string; gameId: GameId }): void {
@@ -1543,24 +1583,10 @@ export class LobbyHubDurableObject {
     }
   }
 
-  private broadcastPresence(excluding?: WebSocket): void {
-    const message = JSON.stringify({ type: "lobby-presence", onlineCount: this.onlineCount(excluding) });
-    for (const socket of this.ctx.getWebSockets("lobby")) {
-      if (socket === excluding) continue;
-      const attachment = socket.deserializeAttachment?.() as LobbySocketAttachment | null;
-      if (!attachment?.identified) continue;
-      try { socket.send(message); } catch { socket.close(1011, "Send failed"); }
-    }
-  }
-
   private async schedule(): Promise<void> {
     const expiry = this.ctx.storage.sql.exec<{ expiresAt: number | null }>(
       "SELECT MIN(expires_at) AS expiresAt FROM public_rooms",
     ).toArray()[0]?.expiresAt;
-    const presenceExpiry = this.ctx.storage.sql.exec<{ expiresAt: number | null }>(
-      "SELECT MIN(expires_at) AS expiresAt FROM match_presence",
-    ).toArray()[0]?.expiresAt;
-    const deadlines = [expiry, presenceExpiry].filter((value): value is number => typeof value === "number");
-    await setAlarmIfChanged(this.ctx.storage, deadlines.length ? Math.min(...deadlines) : null);
+    await setAlarmIfChanged(this.ctx.storage, expiry ?? null);
   }
 }

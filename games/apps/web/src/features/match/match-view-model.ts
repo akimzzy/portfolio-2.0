@@ -9,6 +9,7 @@ type MatchViewModelInput = Readonly<{
   round: number;
   wins: Readonly<{ first: number; second: number }>;
   multiplayer: OnlineMultiplayer | null;
+  aiPresentation: Readonly<{ thinking: boolean; reveal: boolean; revealStarted: boolean; delayMs: number }>;
   isRevealingWin: boolean;
   pendingWinSeat: PlayerSeat | null;
   pendingOnlineMove: PendingOnlineMove | null;
@@ -25,11 +26,13 @@ type MatchViewModelInput = Readonly<{
 /** Build the shared match shell snapshot from the selected game's public selectors. */
 export function createMatchViewSnapshot(input: MatchViewModelInput): MatchViewSnapshot {
   const {
-    game, gameId, state, round, wins, multiplayer: activeSession, isRevealingWin, pendingWinSeat,
+    game, gameId, state, round, wins, multiplayer: activeSession, aiPresentation, isRevealingWin, pendingWinSeat,
     pendingOnlineMove, serverClockOffset, socialFeedback, activityNotice,
     hasUnreadActivity, dialog, dialogReturnValue, onlineDialog, playerName,
   } = input;
   const match = activeSession?.match ?? null;
+  const aiSeatIndex = match?.seatKinds?.findIndex((kind) => kind === 'ai') ?? -1;
+  const aiSeat: PlayerSeat | null = aiSeatIndex === 0 ? 'first' : aiSeatIndex === 1 ? 'second' : null;
   const isOnline = match !== null;
   const isOnlineSession = activeSession !== null;
   const effectiveGameId = match?.gameId ?? gameId;
@@ -50,7 +53,10 @@ export function createMatchViewSnapshot(input: MatchViewModelInput): MatchViewSn
     ? isRematchStarting ? 1 : match.status === 'countdown' && match.gameNumber > 0 ? match.gameNumber + 1 : Math.max(1, match.gameNumber ?? 1)
     : round;
   const target = isOnline ? match.seriesTarget : null;
-  const displayedWins = isRematchStarting ? { first: 0, second: 0 } : match?.wins ?? wins;
+  const confirmedWins = isRematchStarting ? { first: 0, second: 0 } : match?.wins ?? wins;
+  const displayedWins = aiPresentation.thinking && outcome?.kind === 'win' && aiSeat === outcome.winner
+    ? { ...confirmedWins, [outcome.winner]: Math.max(0, confirmedWins[outcome.winner] - 1) }
+    : confirmedWins;
   let statusText = revealingWin ? 'Winning line'
     : outcome?.kind === 'win' ? `${playerName(outcome.winner)} won this game`
       : outcome?.kind === 'draw' ? 'This game ended in a tie'
@@ -88,6 +94,10 @@ export function createMatchViewSnapshot(input: MatchViewModelInput): MatchViewSn
     else if (match.status === 'expired') { statusText = 'This game link has expired'; boardHint = 'Return to games to start or join another match.'; }
   } else if (isOnlineSession) { statusText = 'Joining game…'; boardHint = 'Connecting to game…'; }
   if (pendingOnlineMove && match?.status === 'active') { statusText = 'Move sent'; boardHint = 'Confirming move…'; }
+  if (aiPresentation.thinking && activeSession?.connected && match && ['active', 'between-games', 'completed'].includes(match.status)) {
+    statusText = 'Opponent is thinking…';
+    boardHint = 'Waiting for the move.';
+  }
 
   const players = (['first', 'second'] as const).map((seat) => {
     const name = playerName(seat);
@@ -100,11 +110,12 @@ export function createMatchViewSnapshot(input: MatchViewModelInput): MatchViewSn
     return {
       seat,
       name: isOnline && seat === activeSession?.seat && name !== 'You' ? `${name} · You` : name,
+      opponentNote: null,
       isSelf: isOnline && seat === activeSession?.seat,
       seatLabel,
       score: Math.max(0, (displayedWins[seat] ?? 0) - pendingWin),
-      active: isOnline ? match.status === 'active' && !outcome && nextPlayer === seat : !outcome && nextPlayer === seat,
-      winner: isOnline ? Boolean(!isRematchStarting && match.seriesWinner === seat) : Boolean(!revealingWin && outcome?.kind === 'win' && outcome.winner === seat),
+      active: !aiPresentation.thinking && (isOnline ? match.status === 'active' && !outcome && nextPlayer === seat : !outcome && nextPlayer === seat),
+      winner: isOnline ? Boolean(!aiPresentation.thinking && !isRematchStarting && match.seriesWinner === seat) : Boolean(!revealingWin && outcome?.kind === 'win' && outcome.winner === seat),
     };
   });
   const statusCopy: Record<LiveMatch['status'], string> = {
@@ -116,14 +127,18 @@ export function createMatchViewSnapshot(input: MatchViewModelInput): MatchViewSn
     : outcome?.kind === 'draw' ? 'Tied' : outcome?.kind === 'win' ? `${playerName(outcome.winner)} won` : `${playerName(activeTurn)} to move`;
 
   return {
+    matchId: match?.matchId ?? null, status: match?.status ?? null,
+    hasAiOpponent: aiSeat !== null, aiSeat,
+    aiThinking: aiPresentation.thinking, aiReveal: aiPresentation.reveal,
+    aiRevealStarted: aiPresentation.revealStarted, aiThinkDelayMs: aiPresentation.delayMs,
     gameId: effectiveGameId, rulesVersion, gameState, actionCount, nextPlayer, outcome,
     statusText, boardHint,
-    canPlay: !pendingOnlineMove && !outcome && Boolean(activeTurn) && (activeSession
+    canPlay: !aiPresentation.thinking && !pendingOnlineMove && !outcome && Boolean(activeTurn) && (activeSession
       ? Boolean(match && activeSession.connected && match.status === 'active' && !match.awaitingTurnReceipt && activeTurn === activeSession.seat)
       : true),
     pendingAction: pendingOnlineMove ? { action: pendingOnlineMove.action, seat: pendingOnlineMove.seat } : null,
-    reactionsVisible: Boolean(isOnlineSession && match?.status === 'active'),
-    canReact: Boolean(isOnlineSession && activeSession?.connected && match?.connectedSeats?.every(Boolean) && match?.status === 'active'),
+    reactionsVisible: Boolean(isOnlineSession && match?.status === 'active' && !match.seatKinds?.includes('ai')),
+    canReact: Boolean(isOnlineSession && activeSession?.connected && match?.connectedSeats?.every(Boolean) && match?.status === 'active' && !match.seatKinds?.includes('ai')),
     socialFeedback, activityNotice, hasUnreadActivity,
     roundLabel: isOnline ? `Game ${visibleGameNumber} · ${target === 1 ? 'One game' : `First to ${target}`}` : `Game ${round} · ${actionCount} ${actionCount === 1 ? 'move' : 'moves'}`,
     players,
@@ -133,7 +148,7 @@ export function createMatchViewSnapshot(input: MatchViewModelInput): MatchViewSn
       firstName: playerName('first'), secondName: playerName('second'),
       firstScore: displayedWins.first ?? 0, secondScore: displayedWins.second ?? 0, status: detailStatus,
     },
-    turnCountdown: isOnline && match.status === 'active' && typeof match.turnDeadline === 'number' ? { deadline: match.turnDeadline, clockOffset: serverClockOffset } : null,
+    turnCountdown: !aiPresentation.thinking && isOnline && match.status === 'active' && typeof match.turnDeadline === 'number' ? { deadline: match.turnDeadline, clockOffset: serverClockOffset } : null,
     turnReceipt: isOnline && match.status === 'active' && match.awaitingTurnReceipt ? { ...match.awaitingTurnReceipt, clockOffset: serverClockOffset } : null,
     startCountdown: isOnline && match.status === 'countdown' && typeof match.countdownAt === 'number' ? { deadline: match.countdownAt, clockOffset: serverClockOffset } : null,
     dialog, dialogReturnValue, onlineDialog,
