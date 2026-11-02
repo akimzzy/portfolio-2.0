@@ -4,11 +4,12 @@
 
 - Use TypeScript for the game backend.
 - Keep the backend as an independently deployable service, initially in this repository.
-- Use WebSockets for live two-way match updates. Use ordinary HTTP for operations that do not require a live connection, such as lobby discovery, account profile, history, and leaderboard reads.
+- Use Cloudflare Workers for the service entry point and one SQLite-backed Durable Object per match for authoritative room coordination. Keep the existing portfolio deployment on Vercel. The owner approved this provider direction on 26 October 2026.
+- Use WebSockets for live two-way match updates and the visible lobby feed. Use ordinary HTTP for explicit room/session operations, account profile, history, and leaderboard reads.
 - Keep the service independent of Next.js runtime internals and portfolio-specific server code.
 - The first game is a two-player, turn-based board game. The initial shared platform supports that class of game; real-time physics and high-frequency simulation are outside its current scope.
 
-Frontend/hosting proposal: keep the existing Next.js portfolio and build the games UI separately with React/Vite, hosted on Cloudflare alongside a TypeScript Workers/Durable Objects service. This has been recommended but not approved. TypeScript does not require Next.js or a conventional Node.js server. A Cloudflare deployment must keep game rules free of Cloudflare bindings; provider migration would still require replacing the infrastructure adapters.
+The React/Vite game UI and TypeScript Worker deploy independently from the portfolio. The approved game hostname is `play.ake-em.com`; deployment configuration and production acceptance still need verification. TypeScript does not require Next.js or a conventional Node.js server. Cloudflare bindings belong in the service adapter; provider migration would require replacing infrastructure adapters, while moving the repository is a separate concern. See the [Stage 2 service design](multiplayer-service-design.md) for the deployable shape.
 
 ## Proposed service boundaries
 
@@ -18,7 +19,13 @@ Frontend/hosting proposal: keep the existing Next.js portfolio and build the gam
 4. **Persistence**: stores accounts, usernames, match summaries, operational event data, and precomputed leaderboard results according to separate retention rules.
 5. **Contracts**: versioned request, event, and response schemas shared by client and service. Keep contracts independent of Next.js, UI components, and provider SDKs.
 
-This is a boundary plan, not a commitment to a specific directory tree, database, WebSocket library, hosting vendor, or deployment product. Decide those after reviewing the existing deployment and the provider's WebSocket, background-job, region, and cost characteristics.
+These are logical boundaries, not a mandate for a separate repository or a service per game. The match coordination runtime, React/Vite frontend, and public hostname are selected. Account/history storage, monthly budget, and measured region/capacity targets remain open.
+
+### Database provider decision — deferred
+
+The database decision is intentionally open. The current Worker has no D1 or Supabase binding and no server-side player-history store: active match state lives in per-match Durable Object SQLite, while the lobby hub uses its own Durable Object SQLite tables. Do not provision another database until accounts or server-backed history are scheduled.
+
+When evaluating D1 against Supabase Postgres, estimate expected matches per day, stored summary rows and indexes per match, history page size and read frequency, account/profile reads and writes, leaderboard refresh work, monthly active users, and data egress. Compare D1's daily row limits and per-database storage with Supabase's database size, shared compute, egress, and free-project pause behavior. Neither provider replaces the match Durable Object or lowers its WebSocket/alarm request count. Record measured results and the chosen provider here before adding a binding.
 
 ## Detachment requirements
 
@@ -43,7 +50,7 @@ This is a boundary plan, not a commitment to a specific directory tree, database
 
 HTTP contract areas:
 
-- Create/list/join public rooms; create/read private invites; Quick Match.
+- Create/join public rooms and create/read private invites. A shared Lobby Hub pushes room events and paginated lobby snapshots over one visible-lobby WebSocket; match Durable Objects still arbitrate joins. Quick Match is deferred until traffic can support it.
 - Google authentication callback/session and username selection/availability.
 - User profile and visibility preferences.
 - Match history and rematch request/acceptance.
@@ -54,7 +61,7 @@ WebSocket contract areas:
 
 - Authenticate/authorize a connection and join a match.
 - Submit a move with match ID, client action ID, and expected sequence.
-- Receive authoritative state, accepted/rejected move, timer, presence, disconnect/reconnect, and terminal result events.
+- Receive authoritative state, accepted/rejected move, timer, presence, disconnect/reconnect, terminal result, and transient reaction or bounded quick-message events.
 
 Exact schemas, endpoint paths, token strategy, and versioning policy remain implementation design decisions. Contracts must distinguish account IDs, temporary guest IDs, public usernames, and generated guest display names.
 
@@ -65,6 +72,7 @@ Keep one shared platform for identity, room discovery, seat reservation, session
 The small game-module contract must cover:
 
 - Stable game ID, rules version, action schema, and saved-state schema version.
+- A rules-version-specific turn and reconnect duration policy. The Worker executes deadlines; game modules provide the corresponding values.
 - Creation of initial state, legal-action validation, application of an action, and detection of a terminal outcome.
 - Player-visible state and outcome information; private information must not be serialized to unauthorized clients if a later game introduces it.
 - Supported player count and timing policy. Connect Four's two seats, board dimensions, 45-second turns, and 60-second reconnect allowance belong to its game/session policy, not universal constants.
@@ -87,7 +95,9 @@ Adding a game should require a module, rendering, rules coverage, versioned conf
 
 ## Developer setup and extraction acceptance
 
-Before application implementation, document the concrete package layout and allowed dependencies for the portfolio, game UI, game service, game rules, and protocol contracts. These are logical boundaries; they do not require a separate repository or deployment for every package.
+The workspace now has separate rule and runtime boundaries: `packages/contracts` defines the shared two-player alternating-turn contract; each `packages/<game-id>` package owns deterministic rules; `apps/worker/src/games/registry.ts` registers server-supported games; `apps/web/src/games/registry.ts` supplies the lobby catalog; and `apps/web/src/features/match/games/<game-id>/` supplies game-specific input and rendering. The shared match shell owns room, series, connection, countdown, and social UI. The Worker still owns authoritative moves and room lifecycle. See [the workspace guide](../../games/README.md) for commands and the game-addition checklist.
+
+Keep the package layout and allowed dependencies for the portfolio, game UI, game service, game rules, and protocol contracts documented as the platform evolves. These are logical boundaries; they do not require a separate repository or deployment for every package.
 
 Required developer workflow:
 
@@ -105,7 +115,7 @@ Detachment acceptance: copy the game UI, service, contracts, rules, required lic
 - Persist completed match summaries and the minimum state needed to restore an active match through a short service interruption.
 - Store the leaderboard output generated by the daily job, so visits do not trigger a raw-match scan or recomputation.
 - Keep provider-specific auth/payment abstractions out of core game rules. Google sign-in is planned for account creation; no payments or wallet API exist in the first release.
-- Choose a data store and background-job mechanism that support uniqueness/idempotency, scheduled leaderboard generation, and recovery. Specific products are open until hosting is chosen.
+- Use per-match Durable Object SQLite for active match state, revision, deadlines, and bounded action deduplication. A shared store for accounts, long-lived history, reports, and daily leaderboard outputs remains a later decision; Durable Object storage alone does not settle those cross-match data requirements.
 - Design for unknown traffic with metrics and a measured baseline. Avoid a premature multi-region or multi-service architecture; ensure the selected runtime can scale concurrent WebSocket sessions and route each match to one authoritative owner.
 
 ## Future monetary system boundary

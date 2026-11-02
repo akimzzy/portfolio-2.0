@@ -36,6 +36,8 @@ npm run check:site -- http://localhost:3000
 
 ## Content
 
+The multiplayer Games platform is an independent workspace in [games/](games/README.md). From this repository root, install it with `npm --prefix games ci` and start its web app and backend together with `npm run dev:games`. Its package boundaries, remaining verification gates, and deployment commands are documented in the workspace README. Product planning documents remain in [docs/games/](docs/games/README.md).
+
 - Update profile details, projects, experience, skills, and education in `app/portfolio-data.ts`.
 - Update page metadata in `app/layout.tsx` and the site description in `app/site-config.ts` when profile details change.
 - Add published articles to `content/posts/` as Markdown. Keep unpublished editorial material in `content/drafts/`.

@@ -4,7 +4,7 @@ This is a requirements document for planning. Exact implementation controls, thr
 
 ## Identity and access
 
-- Guests can create and join public matches using generated names. Guest access to private matches is undecided.
+- Guests can create and join matches using an optional display name or an automatically generated fallback. A display name is not an account username or proof of identity. Guest access to private matches is undecided.
 - Guest sessions need unguessable identifiers and short-lived credentials. A display name is not proof of identity.
 - Google sign-in establishes an account. The unique username is a public handle, not an authentication secret.
 - Map a verified Google issuer/subject (`sub`) to a stable internal account ID; do not use email or a public username as the provider identity key. Validate provider tokens and protect callback state using a maintained authentication implementation. See [Google's identity guidance](https://developers.google.com/identity/openid-connect/openid-connect).
@@ -20,9 +20,9 @@ This is a requirements document for planning. Exact implementation controls, thr
 - Make move acceptance, match completion, reports, and leaderboard inputs idempotent.
 - Reject stale sequences, duplicate action IDs, invalid columns, full-column moves, wrong-turn moves, and actions against expired/completed rooms.
 - Use server time for deadlines. Clients display countdowns but cannot decide expiry or pause time.
-- Bound reconnect allowance at 60 seconds per player per match. Repeated disconnects cannot renew it indefinitely.
+- Bound reconnect allowance at 60 cumulative seconds per player per series. Repeated disconnects cannot renew it indefinitely.
 - Provide a report path after public matches and a block control. Define how blocks affect rematching and future public matchmaking before launch.
-- No free-text chat or spectators in the first release. Generated guest names and account usernames still need reserved/prohibited-name handling; policy and enforcement are open.
+- No spectators. In-match typed messages are plain text, single-line, limited to 100 Unicode code points, and accepted only from an authenticated seat during an active game. Share one per-connection WebSocket event budget across reactions and messages; do not persist or replay message content. The client stores only the player's six most recent unique sent messages in local browser storage and provides a clear action. The warning asks players to be respectful and avoid personal details; report and block flows remain a separate launch decision.
 - Private matches and any match involving a guest are unranked. A public match requires both players signed in before play starts to be eligible; guest-history claims cannot turn unranked outcomes into ranked wins. Public rematch and repeated-opponent controls remain product decisions. Threat-model self-play, collusion, account farms, and automated game solvers; server validation prevents illegal moves but cannot guarantee a player receives no outside help.
 - Guest-history claims must reference authoritative outcomes and prove session ownership. Reject edited local results, duplicate claims, and claims already attached to another account. Any retained guest outcome/ownership evidence requires an approved retention period and disclosure.
 
@@ -32,6 +32,7 @@ This is a requirements document for planning. Exact implementation controls, thr
 - Wins and rankings are public by default for accounts. Users can hide them; hidden stats should be removed from public profile/leaderboard views. Whether hidden players still contribute to aggregate rankings is to be decided.
 - Detailed match history is private. User-facing records are summaries: game, date, opponent display name, and result.
 - Guest history is local to the device and may be lost if browser data is cleared or another device is used. Offer a clear option to claim locally available records after signup.
+- Typed in-match message history is separate from game history: keep at most six recent unique sent messages in that browser's local storage, do not sync it to accounts or other devices, and let the player clear it. Messages are relayed live only and are not retained by the game service.
 - Account history remains until account deletion, with a separate clear-history action. Define the effects of clearing/deleting on public aggregates, other players' records, reports, and audit data.
 - Keep operational event logs separate from player-facing history. Collect only what is needed for integrity, abuse investigation, and reliability; set retention, access, and redaction rules before launch.
 - Provide clear privacy copy for public usernames/stats, guest data, Google authentication, reports, and account deletion.
@@ -54,8 +55,9 @@ Hiding public stats must suppress the player from public output promptly, includ
 ## Reliability and failure behavior
 
 - The server is authoritative; clients can reconnect and receive a full current state.
+- For guest recovery across tabs or browser restarts, retain the active seat bearer credential in local browser storage only; never put it in the match URL or logs. The same browser profile can resume that seat, so anyone with access to the profile can act as that guest. Verify the credential against the authenticated snapshot endpoint before resuming, and clear it when the seat is explicitly left, closed, or expired. Replace this guest recovery mechanism with account-backed session recovery when accounts are introduced.
 - Use bounded retries with backoff. Do not create duplicate rooms, moves, results, or leaderboard rows on retry.
-- On a brief client disconnect, allow the agreed reconnect window and show remaining time. On expiry, use the documented turn-timeout rule.
+- On a brief client disconnect, allow the agreed cumulative reconnect window and show remaining time. On expiry during a turn, forfeit only the current game; the series continues unless that point reaches the target.
 - On service restart, restore an active match if state can be safely recovered within the reconnect allowance. Otherwise cancel it with no win/loss and a clear explanation.
 - If leaderboard generation fails, continue serving the most recent successful calculation and show its timestamp; alert operators. Never present stale standings as freshly calculated.
 - If authentication, lobby, or real-time service is unavailable, show an actionable state and keep the portfolio itself usable.
@@ -65,8 +67,8 @@ Hiding public stats must suppress the player from public output promptly, includ
 
 - 45-second move timer, server controlled.
 - Timeout forfeits to the opponent. No skipped turns.
-- Up to 60 seconds reconnect allowance per player per match. It can pause the turn clock only within the remaining cap.
-- Each accepted non-terminal move starts the next player's 45-second turn. Resolve warning timing, exact-deadline ordering, simultaneous disconnects, and multi-device behavior in the game spec before coding.
+- Up to 60 seconds cumulative reconnect allowance per player per series. It can pause the turn clock only within the remaining cap.
+- Each accepted non-terminal move starts the next player's 45-second turn. Simultaneous reconnect expiry between games cancels the series without a winner. Verify exact-deadline ordering and active reconnect recovery; decide multi-device behavior before enabling accounts.
 
 ## Pre-launch security review
 

@@ -8,6 +8,10 @@
     "build:turbopack": "next build",
     "start": "next start",
     "lint": "eslint",
+    "dev:games": "npm --prefix games run dev",
+    "build:games": "npm --prefix games run build",
+    "check:games": "npm --prefix games run check",
+    "test:games": "npm --prefix games test",
     "check:site": "node scripts/check-site.mjs",
     "check:writing": "node scripts/check-writing.mjs",
     "prebuild": "npm run check:writing"

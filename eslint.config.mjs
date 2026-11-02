@@ -11,6 +11,9 @@ const eslintConfig = defineConfig([
     ".next/**",
     "out/**",
     "build/**",
+    "games/packages/*/dist/**",
+    "games/apps/*/dist/**",
+    "games/apps/*/.wrangler/**",
     "next-env.d.ts",
     // Installed design skills include third-party browser tooling.
     ".agents/skills/**",

@@ -2,6 +2,11 @@
 
 # dependencies
 /node_modules
+/games/node_modules/
+/games/packages/*/node_modules/
+/games/packages/*/dist/
+/games/apps/*/dist/
+/games/apps/*/.wrangler/
 /.pnp
 .pnp.*
 .yarn/*

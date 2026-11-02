@@ -1,0 +1,12 @@
+{
+  "name": "@portfolio-games/worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": { ".": "./dist/index.js" },
+  "scripts": { "build": "tsc --build" },
+  "dependencies": {
+    "@portfolio-games/connect-four": "0.1.0",
+    "@portfolio-games/contracts": "0.1.0"
+  }
+}
