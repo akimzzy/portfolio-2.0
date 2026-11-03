@@ -1,4 +1,7 @@
 import { GAME_CATALOG } from '../../games/registry';
+import { opponentProfilesForLobby } from '../../games/opponents';
+import { inHouseRefillCount, MAX_IN_HOUSE_MATCH_COUNT, MIN_IN_HOUSE_MATCH_COUNT, randomInHouseOfferCount, shuffled } from './lobby-opponents';
+import { randomDisplayName } from '../../shared/guest-names';
 
 export type LobbyGame = (typeof GAME_CATALOG)[number];
 export type LobbyMatch = {
@@ -9,8 +12,17 @@ export type LobbyMatch = {
   createdAt: number;
   expiresAt: number;
 };
+export type LobbyOpponentOffer = Readonly<{
+  offerId: string;
+  gameId: string;
+  profileId: string;
+  displayName: string;
+  seriesTarget: 1 | 2 | 3;
+  expiresAt: number;
+}>;
 export type LobbyState = {
   matches: LobbyMatch[];
+  opponentOffers: LobbyOpponentOffer[];
   hasLoadedSnapshot: boolean;
   totalMatches: number | null;
   cursor: string | null;
@@ -22,8 +34,10 @@ export type LobbyState = {
   filter: string;
 };
 
+const RESERVED_OPPONENT_NAMES = ['Ayo', 'Tomi', 'Zara', 'Kola', 'Maya', 'Nia', 'Deji', 'Tobi', 'Kemi', 'Femi', 'Ada', 'Lekan'];
+
 const INITIAL_STATE: LobbyState = {
-  matches: [], hasLoadedSnapshot: false, totalMatches: null, cursor: null, hasMore: false,
+  matches: [], opponentOffers: [], hasLoadedSnapshot: false, totalMatches: null, cursor: null, hasMore: false,
   connection: 'connecting', error: '', canReconnect: false, loadingMore: false,
   filter: getInitialFilter(),
 };
@@ -64,6 +78,12 @@ class LobbyClient {
   private lobbyVisible = false;
   private pageVisible = document.visibilityState === 'visible';
   private awaitingSnapshot = false;
+  private offerTimer: number | null = null;
+  private nextOfferAt: number | null = null;
+  private initialOfferCount: number | null = null;
+  private offersInitialized = false;
+  private readonly profileBags = new Map<string, ReturnType<typeof opponentProfilesForLobby>[number][]>();
+  private readonly lastProfileByFilter = new Map<string, string>();
 
   readonly subscribe = (listener: () => void) => {
     this.listeners.add(listener);
@@ -86,7 +106,12 @@ class LobbyClient {
     const nextFilter = GAME_CATALOG.some((game) => game.id === filter) ? filter : 'all';
     if (this.snapshot.filter === nextFilter) return;
     this.awaitingSnapshot = true;
-    this.update({ ...this.snapshot, filter: nextFilter, matches: [], hasLoadedSnapshot: false, totalMatches: null, cursor: null, hasMore: false, loadingMore: false });
+    this.clearOfferTimer();
+    this.nextOfferAt = null;
+    this.initialOfferCount = null;
+    this.offersInitialized = false;
+    this.update({ ...this.snapshot, filter: nextFilter, matches: [], opponentOffers: [], hasLoadedSnapshot: false, totalMatches: null, cursor: null, hasMore: false, loadingMore: false });
+    this.restoreOffers(nextFilter);
     if (this.socket?.readyState === WebSocket.OPEN) {
       this.socket.send(JSON.stringify({ type: 'subscribe', gameId: nextFilter === 'all' ? null : nextFilter }));
     }
@@ -104,13 +129,175 @@ class LobbyClient {
     this.socket.send(JSON.stringify({ type: 'load-more', cursor: this.snapshot.cursor }));
   }
 
+  consumeOpponentOffer(offerId: string) {
+    const opponentOffers = this.snapshot.opponentOffers.filter((offer) => offer.offerId !== offerId);
+    if (opponentOffers.length === this.snapshot.opponentOffers.length) return;
+    this.update({ ...this.snapshot, opponentOffers });
+  }
+
   private update(snapshot: LobbyState) {
     this.snapshot = snapshot;
+    this.syncOffers();
     for (const listener of this.listeners) listener();
+  }
+
+  private syncOffers() {
+    if (!this.snapshot.hasLoadedSnapshot) {
+      this.clearOfferTimer();
+      return;
+    }
+    const profiles = opponentProfilesForLobby(this.snapshot.filter);
+    const now = Date.now();
+    let offers = this.snapshot.opponentOffers.filter((offer) => offer.expiresAt > now);
+
+    if (!profiles.length) {
+      offers = [];
+      this.nextOfferAt = null;
+      this.snapshot = { ...this.snapshot, opponentOffers: offers };
+      this.persistOffers();
+      this.scheduleOfferTimer();
+      return;
+    }
+
+    // Keep the restored roster while human pages are loading; render it only
+    // after every human room has been listed so humans always appear first.
+    if (this.snapshot.hasMore) {
+      this.nextOfferAt = null;
+    } else if (!this.offersInitialized) {
+      this.initialOfferCount ??= randomInHouseOfferCount();
+      this.snapshot = { ...this.snapshot, opponentOffers: offers };
+      offers = this.createOffers(this.initialOfferCount, profiles, now);
+      this.offersInitialized = true;
+      this.nextOfferAt = null;
+    } else {
+      const refillCount = inHouseRefillCount(offers.length);
+      if (refillCount === 0) {
+        this.nextOfferAt = null;
+      } else {
+        this.nextOfferAt ??= now + randomBetween(8_000, 18_000);
+        if (this.nextOfferAt <= now) {
+          this.snapshot = { ...this.snapshot, opponentOffers: offers };
+          offers = [...offers, ...this.createOffers(Math.min(refillCount, MAX_IN_HOUSE_MATCH_COUNT - offers.length), profiles, now)];
+          this.nextOfferAt = inHouseRefillCount(offers.length) > 0 ? now + randomBetween(8_000, 18_000) : null;
+        }
+      }
+    }
+
+    this.snapshot = { ...this.snapshot, opponentOffers: offers };
+    this.persistOffers();
+    this.scheduleOfferTimer();
+  }
+
+  private createOffers(count: number, profiles: ReturnType<typeof opponentProfilesForLobby>, now: number): LobbyOpponentOffer[] {
+    const usedNames = new Set([
+      ...this.snapshot.matches.map((match) => match.displayName.trim().toLocaleLowerCase()),
+      ...this.snapshot.opponentOffers.map((offer) => offer.displayName.trim().toLocaleLowerCase()),
+    ]);
+    const hasReservedName = this.snapshot.opponentOffers.some((offer) => RESERVED_OPPONENT_NAMES.some((name) => name.toLocaleLowerCase() === offer.displayName.toLocaleLowerCase()));
+    return Array.from({ length: Math.max(0, count) }, (_, index) => {
+      const rosterIndex = this.snapshot.opponentOffers.length + index;
+      const profile = this.nextProfile(profiles);
+      let displayName = this.offerDisplayName(rosterIndex, usedNames, !hasReservedName && index === 0);
+      usedNames.add(displayName.toLocaleLowerCase());
+      return {
+        offerId: `${now.toString(36)}-${Math.random().toString(36).slice(2, 9)}-${index}`,
+        gameId: profile.gameId, profileId: profile.id, displayName,
+        seriesTarget: ([1, 2, 3] as const)[Math.floor(Math.random() * 3)]!,
+        expiresAt: now + randomBetween(180_000, 300_000),
+      };
+    });
+  }
+
+  private nextProfile(profiles: ReturnType<typeof opponentProfilesForLobby>): ReturnType<typeof opponentProfilesForLobby>[number] {
+    const filter = this.snapshot.filter;
+    const availableIds = new Set(profiles.map((profile) => profile.id));
+    let bag = (this.profileBags.get(filter) ?? []).filter((profile) => availableIds.has(profile.id));
+    if (!bag.length) bag = shuffled(profiles);
+    const lastId = this.lastProfileByFilter.get(filter);
+    if (bag.length > 1 && bag[0]?.id === lastId) [bag[0], bag[1]] = [bag[1]!, bag[0]!];
+    const profile = bag.shift() ?? profiles[0]!;
+    this.profileBags.set(filter, bag);
+    this.lastProfileByFilter.set(filter, profile.id);
+    return profile;
+  }
+
+  private offerDisplayName(rosterIndex: number, usedNames: Set<string>, forceReserved = false): string {
+    let displayName: string;
+    const shouldUseReserved = forceReserved || rosterIndex % 4 === 0;
+    if (shouldUseReserved) {
+      const reservedOffset = Math.floor(rosterIndex / 4) % RESERVED_OPPONENT_NAMES.length;
+      displayName = RESERVED_OPPONENT_NAMES[(reservedOffset + Math.floor(Math.random() * RESERVED_OPPONENT_NAMES.length)) % RESERVED_OPPONENT_NAMES.length]!;
+    } else {
+      displayName = randomDisplayName();
+    }
+    for (let attempt = 0; usedNames.has(displayName.toLocaleLowerCase()) && attempt < 24; attempt += 1) {
+      displayName = shouldUseReserved ? RESERVED_OPPONENT_NAMES[Math.floor(Math.random() * RESERVED_OPPONENT_NAMES.length)]! : randomDisplayName();
+    }
+    if (usedNames.has(displayName.toLocaleLowerCase())) {
+      const base = displayName.slice(0, 20);
+      let suffix = 2;
+      while (usedNames.has(`${base} ${suffix}`.toLocaleLowerCase())) suffix += 1;
+      displayName = `${base} ${suffix}`;
+    }
+    return displayName;
+  }
+
+  private scheduleOfferTimer() {
+    this.clearOfferTimer();
+    if (!this.lobbyVisible || !this.pageVisible || !this.snapshot.hasLoadedSnapshot) return;
+    const nextExpiry = this.snapshot.opponentOffers.reduce<number | null>((soonest, offer) =>
+      soonest === null || offer.expiresAt < soonest ? offer.expiresAt : soonest, null);
+    const deadlines = [nextExpiry, this.nextOfferAt].filter((value): value is number => value !== null);
+    if (!deadlines.length) return;
+    this.offerTimer = window.setTimeout(() => {
+      this.offerTimer = null;
+      this.update({ ...this.snapshot });
+    }, Math.max(0, Math.min(...deadlines) - Date.now()));
+  }
+
+  private clearOfferTimer() {
+    if (this.offerTimer !== null) window.clearTimeout(this.offerTimer);
+    this.offerTimer = null;
+  }
+
+  private persistOffers() {
+    try {
+      sessionStorage.setItem(`games:lobby-offers:${this.snapshot.filter}`, JSON.stringify({
+        offers: this.snapshot.opponentOffers,
+        nextOfferAt: this.nextOfferAt,
+        initialOfferCount: this.initialOfferCount,
+        offersInitialized: this.offersInitialized,
+      }));
+    } catch { /* Offers are ephemeral if browser storage is unavailable. */ }
+  }
+
+  private restoreOffers(filter: string) {
+    try {
+      const saved = sessionStorage.getItem(`games:lobby-offers:${filter}`);
+      if (!saved) return;
+      const parsed = JSON.parse(saved) as {
+        offers?: LobbyOpponentOffer[];
+        nextOfferAt?: number | null;
+        initialOfferCount?: number;
+        offersInitialized?: boolean;
+        offerTarget?: number;
+      };
+      const offers = Array.isArray(parsed.offers) ? parsed.offers.filter((offer) =>
+        offer && typeof offer.offerId === 'string' && typeof offer.gameId === 'string' &&
+        typeof offer.profileId === 'string' && typeof offer.displayName === 'string' &&
+        [1, 2, 3].includes(offer.seriesTarget) && Number.isFinite(offer.expiresAt) && offer.expiresAt > Date.now()) : [];
+      this.snapshot = { ...this.snapshot, opponentOffers: offers };
+      const savedInitialCount = parsed.initialOfferCount ?? parsed.offerTarget;
+      this.initialOfferCount = Number.isSafeInteger(savedInitialCount) && savedInitialCount! >= MIN_IN_HOUSE_MATCH_COUNT && savedInitialCount! <= MAX_IN_HOUSE_MATCH_COUNT
+        ? savedInitialCount! : null;
+      this.offersInitialized = typeof parsed.offersInitialized === 'boolean' ? parsed.offersInitialized : Array.isArray(parsed.offers);
+      this.nextOfferAt = typeof parsed.nextOfferAt === 'number' && parsed.nextOfferAt > Date.now() ? parsed.nextOfferAt : null;
+    } catch { this.nextOfferAt = null; this.initialOfferCount = null; this.offersInitialized = false; }
   }
 
   private syncConnection() {
     if (!this.lobbyVisible || !this.pageVisible) {
+      this.clearOfferTimer();
       this.closeSocket();
       return;
     }
@@ -123,6 +310,7 @@ class LobbyClient {
     this.reconnectTimer = null;
     this.update({ ...this.snapshot, connection: this.reconnectAttempt === 0 ? 'connecting' : 'reconnecting', canReconnect: false });
     this.awaitingSnapshot = true;
+    this.restoreOffers(this.snapshot.filter);
     const socket = new WebSocket(socketUrl(this.snapshot.filter));
     this.socket = socket;
 
@@ -202,6 +390,10 @@ class LobbyClient {
     this.socket = null;
     socket.close(1000, 'Lobby not visible');
   }
+}
+
+function randomBetween(min: number, max: number): number {
+  return Math.floor(min + Math.random() * (max - min + 1));
 }
 
 export const lobbyClient = new LobbyClient();

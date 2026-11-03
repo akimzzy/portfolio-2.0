@@ -97,7 +97,7 @@ function socketClient(baseUrl, matchId, seatToken) {
       timer = setTimeout(() => {
         client.waiters = client.waiters.filter((candidate) => candidate !== waiter);
         socket.off("close", onClose);
-        reject(new Error("Timed out waiting for a Worker socket event."));
+        reject(new Error(`Timed out waiting for a Worker socket event: ${predicate.toString()}`));
       }, timeoutMs);
       client.waiters.push(waiter);
       socket.once("close", onClose);
@@ -350,6 +350,7 @@ test("AI matches start on demand and make a server-authoritative reply in the sa
   clients.push(client);
   await client.openAndAuthenticate();
   const activeEvent = await client.waitFor((payload) => payload.type === "match" && payload.match.status === "active" && payload.match.state !== null);
+  assert.equal("aiSocialEvent" in activeEvent, false);
   let active = activeEvent.match;
   if (active.awaitingTurnReceipt?.seat === "second") {
     client.send({ type: "turn-received", revision: active.revision });
@@ -365,11 +366,105 @@ test("AI matches start on demand and make a server-authoritative reply in the sa
     action: { type: "drop-token", column: 3 },
   });
   const response = await accepted;
+  assert.equal("aiSocialEvent" in response, false);
   assert.equal(response.match.status, "active");
   assert.equal(response.match.state.moves.length, active.state.moves.length + 2);
   assert.equal(response.match.state.nextPlayer, "second");
   assert.equal(response.match.seatKinds[0], "ai");
   assert.equal(response.match.seatKinds[1], "human");
+
+  const reaction = client.waitFor((payload) => payload.type === "reaction" && payload.seat === "second");
+  client.send({ type: "reaction", reactionId: "clap" });
+  assert.equal((await reaction).reactionId, "clap");
+
+  await delay(850);
+  const quickMessage = client.waitFor((payload) => payload.type === "quick-message" && payload.seat === "second");
+  client.send({ type: "quick-message", message: "Nice move!" });
+  assert.equal((await quickMessage).message, "Nice move!");
+});
+
+test("public quick matches pair compatible humans atomically and keep settings isolated", { timeout: 30_000 }, async (t) => {
+  const port = await unusedPort();
+  const persistencePath = await mkdtemp(path.join(os.tmpdir(), "portfolio-games-quick-match-"));
+  let worker;
+  const clients = [];
+  t.after(async () => {
+    clients.forEach((client) => client.close());
+    if (worker) await stopWorker(worker.process);
+    await rm(persistencePath, { recursive: true, force: true });
+  });
+
+  worker = await startWorker(port, persistencePath);
+  const request = (displayName, seriesTarget = 2, rulesVersion = RULES_VERSION) => api(worker.baseUrl, "/v1/matches/quick", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ gameId: "connect-four", rulesVersion, seriesTarget, displayName }),
+  });
+  const [first, second] = await Promise.all([request("First Player"), request("Second Player")]);
+  assert.ok([first.response.status, second.response.status].includes(201));
+  assert.ok([first.response.status, second.response.status].includes(200));
+  assert.equal(first.body.matchId, second.body.matchId);
+  assert.deepEqual(new Set([first.body.seat, second.body.seat]), new Set(["first", "second"]));
+  assert.equal([first.body, second.body].filter((body) => body.matched === false).length, 1);
+  assert.equal([first.body, second.body].filter((body) => body.matched === true).length, 1);
+
+  const seats = [first.body, second.body];
+  for (const seat of seats) {
+    const client = socketClient(worker.baseUrl, seat.matchId, seat.seatToken);
+    clients.push(client);
+    await client.openAndAuthenticate();
+  }
+  const active = await clients[1].waitFor((payload) => payload.type === "match" && payload.match.status === "active");
+  assert.deepEqual(active.match.playerNames.sort(), ["First Player", "Second Player"].sort());
+  assert.deepEqual(active.match.seatKinds, ["human", "human"]);
+
+  const differentSeries = await request("Third Player", 1);
+  assert.equal(differentSeries.response.status, 201);
+  assert.notEqual(differentSeries.body.matchId, first.body.matchId);
+  const cancelled = await api(worker.baseUrl, `/v1/matches/${differentSeries.body.matchId}/cancel`, {
+    method: "POST", headers: { Authorization: `Bearer ${differentSeries.body.seatToken}` },
+  });
+  assert.equal(cancelled.response.status, 200);
+  assert.equal(cancelled.body.match.status, "cancelled");
+
+  const anyCandidate = await request("Any Match Host", 1);
+  assert.equal(anyCandidate.response.status, 201);
+  const anyJoiner = await api(worker.baseUrl, "/v1/matches/quick", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ gameId: "connect-four", rulesVersion: RULES_VERSION, seriesTarget: 3, matchAnySeries: true, displayName: "Any Match Joiner" }),
+  });
+  assert.equal(anyJoiner.response.status, 200, JSON.stringify({ candidate: anyCandidate.body, joiner: anyJoiner.body }));
+  assert.equal(anyJoiner.body.matchId, anyCandidate.body.matchId);
+  assert.equal(anyJoiner.body.seriesTarget, 1);
+  assert.equal(anyJoiner.body.matched, true);
+});
+
+test("an unmatched public room schedules its fallback between 8 and 60 seconds", { timeout: 20_000 }, async (t) => {
+  const port = await unusedPort();
+  const persistencePath = await mkdtemp(path.join(os.tmpdir(), "portfolio-games-quick-fallback-"));
+  let worker;
+  const clients = [];
+  t.after(async () => {
+    clients.forEach((client) => client.close());
+    if (worker) await stopWorker(worker.process);
+    await rm(persistencePath, { recursive: true, force: true });
+  });
+
+  worker = await startWorker(port, persistencePath);
+  const created = await api(worker.baseUrl, "/v1/matches/quick", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ gameId: "connect-four", rulesVersion: RULES_VERSION, seriesTarget: 1, displayName: "Waiting Player" }),
+  });
+  assert.equal(created.response.status, 201);
+  assert.equal(created.body.seat, "first");
+  assert.ok(Number.isFinite(created.body.aiFallbackAt));
+  assert.ok(created.body.aiFallbackAt >= created.body.expiresAt - 5 * 60_000 + 8_000);
+  assert.ok(created.body.aiFallbackAt <= created.body.expiresAt - 5 * 60_000 + 60_000);
+  const client = socketClient(worker.baseUrl, created.body.matchId, created.body.seatToken);
+  clients.push(client);
+  await client.openAndAuthenticate();
+  const waiting = await client.waitFor((payload) => payload.type === "match" && payload.match.status === "waiting");
+  assert.equal(waiting.match.seatKinds[1], "human");
+  assert.equal(waiting.match.aiFallbackAt, created.body.aiFallbackAt);
 });
 
 test("AI opponent accepts a rematch and starts the next game without another player seat", { timeout: 30_000 }, async (t) => {
@@ -407,6 +502,54 @@ test("AI opponent accepts a rematch and starts the next game without another pla
     payload.match.gameNumber === 1 && payload.match.revision > result.match.revision);
   assert.ok(restarted.match.state.moves.length === 0 || restarted.match.state.moves.length === 1);
   assert.equal(restarted.match.state.nextPlayer, "second");
+});
+
+test("AI opponents stop accepting rematches after their persisted one-to-three rematch allowance", { timeout: 60_000 }, async (t) => {
+  const port = await unusedPort();
+  const persistencePath = await mkdtemp(path.join(os.tmpdir(), "portfolio-games-ai-rematch-limit-"));
+  let worker;
+  const clients = [];
+  t.after(async () => {
+    clients.forEach((client) => client.close());
+    if (worker) await stopWorker(worker.process);
+    await rm(persistencePath, { recursive: true, force: true });
+  });
+
+  worker = await startWorker(port, persistencePath);
+  const created = await api(worker.baseUrl, "/v1/matches/ai", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ gameId: "connect-four", profileId: "expert", seriesTarget: 1, displayName: "Test Player" }),
+  });
+  assert.equal(created.response.status, 201);
+  const client = socketClient(worker.baseUrl, created.body.matchId, created.body.seatToken);
+  clients.push(client);
+  await client.openAndAuthenticate();
+  await client.waitFor((payload) => payload.type === "match" && payload.match.status === "active");
+
+  let completed;
+  const resign = async () => {
+    const next = client.waitFor((payload) => payload.type === "match" && payload.match.status === "completed");
+    client.send({ type: "resign" });
+    completed = await next;
+  };
+  await resign();
+  let accepted = 0;
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    const result = client.waitFor((payload) => payload.type === "match" && payload.match.revision > completed.match.revision &&
+      (payload.match.status === "countdown" || (payload.match.status === "completed" && payload.match.closedSeats[0] === true)));
+    client.send({ type: "rematch" });
+    const response = await result;
+    if (response.match.status === "completed") {
+      completed = response;
+      break;
+    }
+    accepted += 1;
+    await client.waitFor((payload) => payload.type === "match" && payload.match.status === "active" && payload.match.gameNumber === 1);
+    await resign();
+    if (completed.match.closedSeats[0]) break;
+  }
+  assert.ok(accepted >= 1 && accepted <= 3, `expected one to three accepted rematches, got ${accepted}`);
+  assert.equal(completed.match.closedSeats[0], true, "AI seat should be closed once its allowance is used");
 });
 
 test("replacing a live player's socket preserves the seat and allows the current turn", { timeout: 60_000 }, async (t) => {

@@ -9,7 +9,7 @@ type MatchViewModelInput = Readonly<{
   round: number;
   wins: Readonly<{ first: number; second: number }>;
   multiplayer: OnlineMultiplayer | null;
-  aiPresentation: Readonly<{ thinking: boolean; reveal: boolean; revealStarted: boolean; delayMs: number }>;
+  aiPresentation: Readonly<{ thinking: boolean; reveal: boolean; revealStarted: boolean; delayMs: number; turnDeadline: number | null }>;
   isRevealingWin: boolean;
   pendingWinSeat: PlayerSeat | null;
   pendingOnlineMove: PendingOnlineMove | null;
@@ -95,8 +95,8 @@ export function createMatchViewSnapshot(input: MatchViewModelInput): MatchViewSn
   } else if (isOnlineSession) { statusText = 'Joining game…'; boardHint = 'Connecting to game…'; }
   if (pendingOnlineMove && match?.status === 'active') { statusText = 'Move sent'; boardHint = 'Confirming move…'; }
   if (aiPresentation.thinking && activeSession?.connected && match && ['active', 'between-games', 'completed'].includes(match.status)) {
-    statusText = 'Opponent is thinking…';
-    boardHint = 'Waiting for the move.';
+    statusText = aiSeat ? `${playerName(aiSeat)}’s turn` : 'Opponent’s turn';
+    boardHint = 'Waiting for your opponent.';
   }
 
   const players = (['first', 'second'] as const).map((seat) => {
@@ -114,7 +114,9 @@ export function createMatchViewSnapshot(input: MatchViewModelInput): MatchViewSn
       isSelf: isOnline && seat === activeSession?.seat,
       seatLabel,
       score: Math.max(0, (displayedWins[seat] ?? 0) - pendingWin),
-      active: !aiPresentation.thinking && (isOnline ? match.status === 'active' && !outcome && nextPlayer === seat : !outcome && nextPlayer === seat),
+      active: aiPresentation.thinking
+        ? seat === aiSeat && !outcome
+        : isOnline ? match.status === 'active' && !outcome && nextPlayer === seat : !outcome && nextPlayer === seat,
       winner: isOnline ? Boolean(!aiPresentation.thinking && !isRematchStarting && match.seriesWinner === seat) : Boolean(!revealingWin && outcome?.kind === 'win' && outcome.winner === seat),
     };
   });
@@ -137,8 +139,8 @@ export function createMatchViewSnapshot(input: MatchViewModelInput): MatchViewSn
       ? Boolean(match && activeSession.connected && match.status === 'active' && !match.awaitingTurnReceipt && activeTurn === activeSession.seat)
       : true),
     pendingAction: pendingOnlineMove ? { action: pendingOnlineMove.action, seat: pendingOnlineMove.seat } : null,
-    reactionsVisible: Boolean(isOnlineSession && match?.status === 'active' && !match.seatKinds?.includes('ai')),
-    canReact: Boolean(isOnlineSession && activeSession?.connected && match?.connectedSeats?.every(Boolean) && match?.status === 'active' && !match.seatKinds?.includes('ai')),
+    reactionsVisible: Boolean(isOnlineSession && match?.status === 'active'),
+    canReact: Boolean(isOnlineSession && activeSession?.connected && match?.connectedSeats?.every(Boolean) && match?.status === 'active'),
     socialFeedback, activityNotice, hasUnreadActivity,
     roundLabel: isOnline ? `Game ${visibleGameNumber} · ${target === 1 ? 'One game' : `First to ${target}`}` : `Game ${round} · ${actionCount} ${actionCount === 1 ? 'move' : 'moves'}`,
     players,
@@ -148,7 +150,11 @@ export function createMatchViewSnapshot(input: MatchViewModelInput): MatchViewSn
       firstName: playerName('first'), secondName: playerName('second'),
       firstScore: displayedWins.first ?? 0, secondScore: displayedWins.second ?? 0, status: detailStatus,
     },
-    turnCountdown: !aiPresentation.thinking && isOnline && match.status === 'active' && typeof match.turnDeadline === 'number' ? { deadline: match.turnDeadline, clockOffset: serverClockOffset } : null,
+    turnCountdown: aiPresentation.thinking && aiPresentation.turnDeadline !== null
+      ? { deadline: aiPresentation.turnDeadline, clockOffset: 0 }
+      : isOnline && match.status === 'active' && typeof match.turnDeadline === 'number'
+        ? { deadline: match.turnDeadline, clockOffset: serverClockOffset }
+        : null,
     turnReceipt: isOnline && match.status === 'active' && match.awaitingTurnReceipt ? { ...match.awaitingTurnReceipt, clockOffset: serverClockOffset } : null,
     startCountdown: isOnline && match.status === 'countdown' && typeof match.countdownAt === 'number' ? { deadline: match.countdownAt, clockOffset: serverClockOffset } : null,
     dialog, dialogReturnValue, onlineDialog,

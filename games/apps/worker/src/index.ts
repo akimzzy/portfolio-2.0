@@ -8,6 +8,8 @@ const DEFAULT_RECONNECT_DURATION_MS = 60_000;
 const ROOM_TTL_MS = 5 * 60_000;
 const INVITE_TTL_MS = 24 * 60 * 60_000;
 const COUNTDOWN_MS = 2_000;
+const PUBLIC_AI_FALLBACK_MIN_MS = 8_000;
+const PUBLIC_AI_FALLBACK_MAX_MS = 60_000;
 const NEXT_GAME_TIMEOUT_MS = 30_000;
 const TERMINAL_MATCH_RETENTION_MS = 24 * 60 * 60_000;
 const AUTH_TIMEOUT_MS = 8_000;
@@ -27,6 +29,7 @@ type Seat = { tokenHash: string | null; kind?: "human" | "ai"; aiProfileId?: str
 type Match = {
   id: string; gameId: GameId; rulesVersion: number; visibility: Visibility; status: Status; createdAt: number; expiresAt: number;
   retentionDeadline?: number | null;
+  aiFallbackAt?: number | null;
   revision: number; state: unknown | null; seats: [Seat | null, Seat | null];
   countdownAt: number | null; turnDeadline: number | null; turnStartedAt: number | null;
   nextGameDeadline: number | null;
@@ -40,9 +43,11 @@ type Match = {
   rematchCountdown: boolean; seriesWinner: PlayerSeat | null;
   aiSeed?: number | null;
   aiEngineVersion?: number | null;
+  aiRematchesAllowed?: number;
+  aiRematchesUsed?: number;
 };
 type LobbyEntry = Readonly<{
-  matchId: string; gameId: GameId; displayName: string; seriesTarget: 1 | 2 | 3; createdAt: number; expiresAt: number;
+  matchId: string; gameId: GameId; rulesVersion: number; displayName: string; seriesTarget: 1 | 2 | 3; createdAt: number; expiresAt: number;
 }>;
 type SocketAttachment = { authenticated: false; authDeadline: number } | {
   authenticated: true; seat: PlayerSeat; lastSyncAt?: number; reactionTimes?: number[];
@@ -132,6 +137,11 @@ function cors(request: Request, env: WorkerEnv): HeadersInit {
     : {};
 }
 function createId(): string { return token(16).replaceAll("-", "X").replaceAll("_", "Y").slice(0, 22); }
+function publicAiFallbackAt(createdAt: number, expiresAt: number): number {
+  const earliest = createdAt + PUBLIC_AI_FALLBACK_MIN_MS;
+  const latest = Math.min(expiresAt, createdAt + PUBLIC_AI_FALLBACK_MAX_MS);
+  return earliest + Math.floor(Math.random() * (latest - earliest + 1));
+}
 function fallbackDisplayName(matchId: string, seatIndex: number): string {
   let value = 2_166_136_261 ^ (seatIndex * 2_246_822_519);
   for (const character of matchId) value = Math.imul(value ^ character.charCodeAt(0), 16_777_619);
@@ -170,6 +180,7 @@ function snapshot(match: Match) {
     playerNames: match.seats.map((seat) => seat?.displayName ?? null),
     seatKinds: match.seats.map((seat) => seat?.kind ?? "human"),
     countdownAt: match.countdownAt, turnDeadline: match.turnDeadline, nextGameDeadline: match.nextGameDeadline, outcome: match.outcome,
+    aiFallbackAt: match.aiFallbackAt ?? null,
     expiresAt: match.expiresAt, serverNow: Date.now(), seriesTarget: match.seriesTarget,
     bestOf: match.seriesTarget * 2 - 1, wins: match.wins, gameNumber: match.gameNumber,
     nextReady: match.nextReady, rematchReady: match.rematchReady, closedSeats: match.closedSeats,
@@ -195,6 +206,7 @@ function expiredStatus(match: Match): boolean {
   return match.status === "cancelled" || match.status === "expired";
 }
 function otherSeat(seat: PlayerSeat): PlayerSeat { return seat === "first" ? "second" : "first"; }
+function aiRematchLimit(seed: number): number { return 1 + (seed % 3); }
 function outcomeWinner(outcome: string): PlayerSeat | null {
   if (outcome === "draw") return null;
   if (outcome.startsWith("win-")) return outcome.endsWith("first") ? "first" : outcome.endsWith("second") ? "second" : null;
@@ -213,6 +225,7 @@ function normalizeMatch(match: Match): Match {
   if (priorWinner) wins[priorWinner] = Math.max(wins[priorWinner], target);
   const normalized: Match = {
     ...match,
+    aiFallbackAt: typeof match.aiFallbackAt === "number" && Number.isFinite(match.aiFallbackAt) ? match.aiFallbackAt : null,
     gameId: typeof match.gameId === "string" ? match.gameId : "connect-four",
     rulesVersion: Number.isSafeInteger(match.rulesVersion) && match.rulesVersion > 0 ? match.rulesVersion : 1,
     seats: match.seats.map((seat, index) => seat ? {
@@ -276,11 +289,20 @@ function normalizeMatch(match: Match): Match {
       ? normalized.aiEngineVersion
       : opponentProviderForGame(normalized.gameId)?.currentEngineVersion ?? null
     : null;
+  const hasAiSeat = normalized.seats.some((seat) => seat?.kind === "ai");
+  normalized.aiRematchesAllowed = hasAiSeat && typeof normalized.aiRematchesAllowed === "number" && Number.isSafeInteger(normalized.aiRematchesAllowed) && normalized.aiRematchesAllowed >= 1 && normalized.aiRematchesAllowed <= 3
+    ? normalized.aiRematchesAllowed : hasAiSeat ? 1 : 0;
+  normalized.aiRematchesUsed = hasAiSeat && typeof normalized.aiRematchesUsed === "number" && Number.isSafeInteger(normalized.aiRematchesUsed) && normalized.aiRematchesUsed >= 0 && normalized.aiRematchesUsed <= 3
+    ? normalized.aiRematchesUsed : 0;
   return normalized;
 }
 function timerStateNeedsPersistence(original: Match, normalized: Match): boolean {
-  const fields = ["countdownAt", "turnDeadline", "turnStartedAt", "nextGameDeadline", "reconnectSeat", "reconnectDeadline", "pausedTurnMs", "turnReceiptPending", "turnReceiptStartedAt"] as const;
-    return fields.some((field) => !Object.hasOwn(original, field) || original[field] !== normalized[field]);
+  const fields = ["aiFallbackAt", "countdownAt", "turnDeadline", "turnStartedAt", "nextGameDeadline", "reconnectSeat", "reconnectDeadline", "pausedTurnMs", "turnReceiptPending", "turnReceiptStartedAt"] as const;
+  const aiFields = normalized.seats.some((seat) => seat?.kind === "ai")
+    ? ["aiRematchesAllowed", "aiRematchesUsed"] as const
+    : [];
+  const allFields = [...fields, ...aiFields] as readonly (keyof Match)[];
+  return allFields.some((field) => !Object.hasOwn(original, field) || original[field] !== normalized[field]);
 }
 
 export default {
@@ -311,10 +333,31 @@ export default {
       return json(await response.json(), 200, headers);
     }
 
-    if ((request.method === "POST" && (url.pathname === "/v1/matches" || url.pathname === "/v1/matches/ai" || /^\/v1\/matches\/[A-Za-z0-9_-]{22}\/(?:join|preview)$/.test(url.pathname)))) {
+    if ((request.method === "POST" && (url.pathname === "/v1/matches" || url.pathname === "/v1/matches/quick" || url.pathname === "/v1/matches/ai" || /^\/v1\/matches\/[A-Za-z0-9_-]{22}\/(?:join|preview)$/.test(url.pathname)))) {
       const source = request.headers.get("cf-connecting-ip") ?? "local-development";
       const { success } = await env.ROOMS_RATE_LIMITER.limit({ key: `room-operations:${source}` });
       if (!success) return json({ error: "rate-limited", message: "Too many game room requests. Wait a moment and try again." }, 429, { ...headers, "Retry-After": "60" });
+    }
+
+    if (url.pathname === "/v1/matches/quick" && request.method === "POST") {
+      const input = await body(request);
+      if (!input || typeof input !== "object" || Array.isArray(input)) return json({ error: "invalid-request" }, 400, headers);
+      const values = input as Record<string, unknown>;
+      const gameId = typeof values.gameId === "string" ? values.gameId : "connect-four";
+      const game = workerGames.get(gameId);
+      if (!game) return json({ error: "unsupported-game" }, 404, headers);
+      const rulesVersion = values.rulesVersion ?? (game.gameId === "connect-four" ? 1 : game.rulesVersion);
+      if (typeof rulesVersion !== "number" || !game.supportsRulesVersion(rulesVersion)) return json({ error: "unsupported-rules-version" }, 400, headers);
+      const seriesTarget = values.seriesTarget;
+      if (seriesTarget !== 1 && seriesTarget !== 2 && seriesTarget !== 3) return json({ error: "invalid-series-target" }, 400, headers);
+      if (values.matchAnySeries !== undefined && typeof values.matchAnySeries !== "boolean") return json({ error: "invalid-match-preference" }, 400, headers);
+      const lobby = env.LOBBY_HUB.get(env.LOBBY_HUB.idFromName("lobby:global"));
+      const result = await lobby.fetch(new Request("https://lobby-hub.internal/quick-match", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ gameId, rulesVersion, seriesTarget, matchAnySeries: values.matchAnySeries === true, displayName: values.displayName }),
+      }));
+      const payload = await result.json() as unknown;
+      return json(payload, result.status, headers);
     }
 
     if (url.pathname === "/v1/matches" && request.method === "POST") {
@@ -340,6 +383,7 @@ export default {
         id, gameId, rulesVersion, visibility, status: "waiting", createdAt: now,
         retentionDeadline: null,
         expiresAt: now + (visibility === "public" ? ROOM_TTL_MS : INVITE_TTL_MS),
+        aiFallbackAt: visibility === "public" ? publicAiFallbackAt(now, now + ROOM_TTL_MS) : null,
         revision: 0, state: null,
         seats: [{ tokenHash: await hash(seatToken), displayName, connected: false, reconnectRemainingMs: game.getSessionPolicy(rulesVersion).reconnectDurationMs, disconnectedAt: null }, null],
         countdownAt: null, turnDeadline: null, turnStartedAt: null, nextGameDeadline: null,
@@ -348,6 +392,7 @@ export default {
         seriesTarget, wins: { first: 0, second: 0 }, gameNumber: 0,
         seriesStartingSeat: null, nextStartingSeat: null, nextReady: [false, false],
         rematchReady: [false, false], closedSeats: [false, false], rematchCountdown: false, seriesWinner: null,
+        aiRematchesAllowed: 0, aiRematchesUsed: 0,
       };
       const stub = env.MATCHES.get(env.MATCHES.idFromName(id));
       const created = await stub.fetch(new Request("https://match.internal/create", {
@@ -361,7 +406,7 @@ export default {
           const lobby = env.LOBBY_HUB.get(env.LOBBY_HUB.idFromName("lobby:global"));
           const indexed = await lobby.fetch(new Request("https://lobby-hub.internal/upsert", {
             method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ matchId: id, gameId, displayName, seriesTarget, createdAt: now, expiresAt: match.expiresAt }),
+            body: JSON.stringify({ matchId: id, gameId, rulesVersion, displayName, seriesTarget, createdAt: now, expiresAt: match.expiresAt }),
           }));
           listed = indexed.ok;
         } catch { listed = false; }
@@ -404,6 +449,7 @@ export default {
         seriesStartingSeat: null, nextStartingSeat: null, nextReady: [false, false], rematchReady: [false, false],
         closedSeats: [false, false], rematchCountdown: false, seriesWinner: null,
         aiSeed, aiEngineVersion: opponentProvider.currentEngineVersion,
+        aiRematchesAllowed: aiRematchLimit(aiSeed), aiRematchesUsed: 0,
       };
       const stub = env.MATCHES.get(env.MATCHES.idFromName(id));
       const created = await stub.fetch(new Request("https://match.internal/create", {
@@ -495,7 +541,18 @@ export default {
 };
 
 export class MatchDurableObject {
+  private mutationTail: Promise<void> = Promise.resolve();
+
   constructor(private readonly ctx: DurableObjectState, private readonly env: WorkerEnv) {}
+
+  private async serializeMutation<T>(operation: () => Promise<T>): Promise<T> {
+    const previous = this.mutationTail;
+    let release!: () => void;
+    this.mutationTail = new Promise<void>((resolve) => { release = resolve; });
+    await previous;
+    try { return await operation(); }
+    finally { release(); }
+  }
 
   private async load(): Promise<Match | null> {
     const stored = await this.ctx.storage.get<Match>("match");
@@ -528,11 +585,11 @@ export class MatchDurableObject {
       await this.schedule(data.match);
       return json({ ok: true }, 201);
     }
-    if (operation === "join" && request.method === "POST") return this.join(request);
-    if (operation === "preview" && request.method === "POST") return this.preview(request);
-    if (operation === "cancel" && request.method === "POST") return this.cancelWaitingRoom(request);
-    if (operation === "leave" && request.method === "POST") return this.leaveWaitingRoom(request);
-    if (operation === "leave-series" && request.method === "POST") return this.leaveCompletedSeries(request);
+    if (operation === "join" && request.method === "POST") return this.serializeMutation(() => this.join(request));
+    if (operation === "preview" && request.method === "POST") return this.serializeMutation(() => this.preview(request));
+    if (operation === "cancel" && request.method === "POST") return this.serializeMutation(() => this.cancelWaitingRoom(request));
+    if (operation === "leave" && request.method === "POST") return this.serializeMutation(() => this.leaveWaitingRoom(request));
+    if (operation === "leave-series" && request.method === "POST") return this.serializeMutation(() => this.leaveCompletedSeries(request));
     if (operation === "snapshot" && request.method === "GET") {
       const match = await this.load();
       if (!match) return json({ error: "not-found" }, 404);
@@ -544,8 +601,8 @@ export class MatchDurableObject {
       const latest = await this.load();
       return latest ? json(snapshot(latest)) : json({ error: "not-found" }, 404);
     }
-    if (operation === "socket" && request.method === "GET") return this.socketUpgrade();
-    if (operation === "resign" && request.method === "POST") return this.resign(request);
+    if (operation === "socket" && request.method === "GET") return this.serializeMutation(() => this.socketUpgrade());
+    if (operation === "resign" && request.method === "POST") return this.serializeMutation(() => this.resign(request));
     return json({ error: "not-found" }, 404);
   }
 
@@ -574,6 +631,7 @@ export class MatchDurableObject {
       tokenHash: data.seatTokenHash, displayName,
       connected: false, reconnectRemainingMs: sessionPolicy(match).reconnectDurationMs, disconnectedAt: null,
     };
+    match.aiFallbackAt = null;
     match.revision += 1;
     await this.save(match);
     await this.removeFromLobby(match);
@@ -657,7 +715,7 @@ export class MatchDurableObject {
         const lobby = this.env.LOBBY_HUB.get(this.env.LOBBY_HUB.idFromName("lobby:global"));
         await lobby.fetch(new Request("https://lobby-hub.internal/upsert", {
           method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ matchId: match.id, gameId: match.gameId, displayName: match.seats[0]?.displayName ?? "Player", seriesTarget: match.seriesTarget, createdAt: match.createdAt, expiresAt: match.expiresAt }),
+          body: JSON.stringify({ matchId: match.id, gameId: match.gameId, rulesVersion: match.rulesVersion, displayName: match.seats[0]?.displayName ?? "Player", seriesTarget: match.seriesTarget, createdAt: match.createdAt, expiresAt: match.expiresAt }),
         }));
       } catch { /* The waiting room remains authoritative; the lobby entry can be refreshed later. */ }
     }
@@ -703,6 +761,10 @@ export class MatchDurableObject {
   }
 
   async webSocketMessage(socket: WebSocket, raw: string | ArrayBuffer): Promise<void> {
+    return this.serializeMutation(() => this.processWebSocketMessage(socket, raw));
+  }
+
+  private async processWebSocketMessage(socket: WebSocket, raw: string | ArrayBuffer): Promise<void> {
     if (typeof raw !== "string" || new TextEncoder().encode(raw).length > MAX_FRAME_BYTES) { socket.close(1009, "Message too large"); return; }
     let message: unknown;
     try { message = JSON.parse(raw) as unknown; } catch { socket.close(1007, "Invalid JSON"); return; }
@@ -843,7 +905,7 @@ export class MatchDurableObject {
         return;
       }
       socket.serializeAttachment?.({ ...attachment, lastSyncAt: now } satisfies SocketAttachment);
-      await this.alarm();
+      await this.processAlarm();
       const latest = await this.load();
       if (!latest) { socket.close(1011, "Match unavailable"); return; }
       socket.send(JSON.stringify({ type: "match", match: snapshot(latest), syncId }));
@@ -863,10 +925,6 @@ export class MatchDurableObject {
       }
       if (match.status !== "active") {
         socket.send(JSON.stringify({ type: isReaction ? "reaction-rejected" : "quick-message-rejected", code: "match-not-active" }));
-        return;
-      }
-      if (match.seats.some((seat) => seat?.kind === "ai")) {
-        socket.send(JSON.stringify({ type: isReaction ? "reaction-rejected" : "quick-message-rejected", code: "social-unavailable" }));
         return;
       }
       const now = Date.now();
@@ -986,6 +1044,10 @@ export class MatchDurableObject {
   }
 
   async webSocketClose(socket: WebSocket): Promise<void> {
+    return this.serializeMutation(() => this.processWebSocketClose(socket));
+  }
+
+  private async processWebSocketClose(socket: WebSocket): Promise<void> {
     const attachment = socket.deserializeAttachment?.() as SocketAttachment | null;
     if (!attachment?.authenticated) return;
     const hasReplacement = this.ctx.getWebSockets().some((candidate) => {
@@ -1026,6 +1088,10 @@ export class MatchDurableObject {
   }
 
   async alarm(): Promise<void> {
+    return this.serializeMutation(() => this.processAlarm());
+  }
+
+  private async processAlarm(): Promise<void> {
     const match = await this.load();
     if (!match) return;
     const now = Date.now();
@@ -1044,10 +1110,42 @@ export class MatchDurableObject {
     }
     let changed = false;
     if (await this.expireWaitingRoom(match, now)) return;
+    if (match.status === "waiting" && match.aiFallbackAt !== null && match.aiFallbackAt !== undefined &&
+      now >= match.aiFallbackAt && !match.seats[1]) {
+      const provider = opponentProviderForGame(match.gameId);
+      const game = gameForMatch(match);
+      if (provider && game) {
+        const seed = crypto.getRandomValues(new Uint32Array(1))[0] ?? 1;
+        const profileId = provider.profileIds[seed % provider.profileIds.length] ?? provider.defaultProfileId;
+        match.seats[1] = {
+          tokenHash: null, kind: "ai", aiProfileId: profileId,
+          displayName: uniqueGeneratedDisplayName(match.id, 1, [match.seats[0]?.displayName ?? ""]),
+          connected: true, reconnectRemainingMs: sessionPolicy(match).reconnectDurationMs, disconnectedAt: null,
+        };
+        match.aiSeed = seed;
+        match.aiEngineVersion = provider.currentEngineVersion;
+        match.aiRematchesAllowed = aiRematchLimit(seed);
+        match.aiRematchesUsed = 0;
+        match.aiFallbackAt = null;
+        if (match.seats[0]?.connected) {
+          match.status = "countdown";
+          match.countdownAt = now + COUNTDOWN_MS;
+        }
+        match.revision += 1;
+        await this.save(match);
+        await this.removeFromLobby(match);
+        await this.schedule(match);
+        this.broadcast({ type: "match", match: snapshot(match) });
+        return;
+      }
+    }
     if (match.status === "countdown" && match.countdownAt !== null && now >= match.countdownAt) {
       if (match.seats.every((seat) => seat?.connected)) {
         const startsRematch = match.rematchCountdown;
         if (startsRematch) {
+          if (match.seats.some((seat) => seat?.kind === "ai")) {
+            match.aiRematchesUsed = Math.min(3, (match.aiRematchesUsed ?? 0) + 1);
+          }
           match.wins = { first: 0, second: 0 };
           match.gameNumber = 0;
           match.seriesWinner = null;
@@ -1171,6 +1269,12 @@ export class MatchDurableObject {
     match.seriesWinner = winner && match.wins[winner] >= match.seriesTarget ? winner : null;
     match.status = match.seriesWinner ? "completed" : "between-games";
     match.retentionDeadline = match.status === "completed" ? Date.now() + TERMINAL_MATCH_RETENTION_MS : null;
+    if (match.status === "completed") {
+      const aiIndex = match.seats.findIndex((seat) => seat?.kind === "ai");
+      if (aiIndex >= 0 && (match.aiRematchesUsed ?? 0) >= (match.aiRematchesAllowed ?? 1)) {
+        match.closedSeats[aiIndex] = true;
+      }
+    }
     match.nextGameDeadline = match.seriesWinner ? null : Date.now() + NEXT_GAME_TIMEOUT_MS;
     match.nextReady = [false, false];
     match.rematchReady = [false, false];
@@ -1264,8 +1368,14 @@ export class MatchDurableObject {
     if (match.status !== "completed" || !match.seriesWinner || match.closedSeats.some(Boolean)) return;
     const index = seat === "first" ? 0 : 1;
     if (match.rematchReady[index]) return;
-    match.rematchReady[index] = true;
     const aiIndex = match.seats.findIndex((entry) => entry?.kind === "ai");
+    if (aiIndex >= 0 && (match.aiRematchesUsed ?? 0) >= (match.aiRematchesAllowed ?? 1)) {
+      match.closedSeats[aiIndex] = true;
+      match.revision += 1;
+      await this.publish(match);
+      return;
+    }
+    match.rematchReady[index] = true;
     if (aiIndex >= 0) match.rematchReady[aiIndex] = true;
     if (match.rematchReady.every(Boolean)) {
       const previousStarter = match.seriesStartingSeat ?? stateStartingPlayer(match) ?? "first";
@@ -1348,6 +1458,7 @@ export class MatchDurableObject {
       else if (dueIsActionable) deadlines.push(now + 50);
     };
     if (match.status === "waiting") addDeadline(match.expiresAt);
+    if (match.status === "waiting") addDeadline(match.aiFallbackAt ?? null);
     if (match.status === "countdown") addDeadline(match.countdownAt);
     if (match.status === "active") {
       addDeadline(match.turnDeadline);
@@ -1390,25 +1501,159 @@ const LOBBY_PAGE_SIZE = 20;
 
 /** Event-driven, cross-game lobby feed for joinable human-created rooms. */
 export class LobbyHubDurableObject {
-  constructor(private readonly ctx: DurableObjectState, _env: WorkerEnv) {
+  private readonly matchmakingTails = new Map<string, Promise<void>>();
+
+  constructor(private readonly ctx: DurableObjectState, private readonly env: WorkerEnv) {
     this.ctx.storage.sql.exec(`
       CREATE TABLE IF NOT EXISTS public_rooms (
         match_id TEXT PRIMARY KEY,
         game_id TEXT NOT NULL,
+        rules_version INTEGER NOT NULL DEFAULT 1,
         display_name TEXT NOT NULL,
         series_target INTEGER NOT NULL,
         created_at INTEGER NOT NULL,
         expires_at INTEGER NOT NULL
       );
+    `);
+    const columns = this.ctx.storage.sql.exec<{ name: string }>("PRAGMA table_info(public_rooms)").toArray();
+    if (!columns.some((column) => column.name === "rules_version")) {
+      this.ctx.storage.sql.exec("ALTER TABLE public_rooms ADD COLUMN rules_version INTEGER NOT NULL DEFAULT 1");
+    }
+    this.ctx.storage.sql.exec(`
       CREATE INDEX IF NOT EXISTS lobby_rooms_created ON public_rooms (created_at DESC, match_id ASC);
       CREATE INDEX IF NOT EXISTS lobby_rooms_game_created ON public_rooms (game_id, created_at DESC, match_id ASC);
       CREATE INDEX IF NOT EXISTS lobby_rooms_expiry ON public_rooms (expires_at);
+      CREATE INDEX IF NOT EXISTS lobby_rooms_matchmaking ON public_rooms (game_id, rules_version, series_target, created_at, match_id);
     `);
+  }
+
+  private async serializeMatchmaking<T>(key: string, operation: () => Promise<T>): Promise<T> {
+    const previous = this.matchmakingTails.get(key) ?? Promise.resolve();
+    let release!: () => void;
+    const current = new Promise<void>((resolve) => { release = resolve; });
+    this.matchmakingTails.set(key, current);
+    await previous;
+    try { return await operation(); }
+    finally {
+      release();
+      if (this.matchmakingTails.get(key) === current) this.matchmakingTails.delete(key);
+    }
+  }
+
+  private upsertEntry(entry: LobbyEntry): void {
+    this.ctx.storage.sql.exec(`
+      INSERT INTO public_rooms (match_id, game_id, rules_version, display_name, series_target, created_at, expires_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(match_id) DO UPDATE SET
+        game_id = excluded.game_id,
+        rules_version = excluded.rules_version,
+        display_name = excluded.display_name,
+        series_target = excluded.series_target,
+        created_at = excluded.created_at,
+        expires_at = excluded.expires_at
+    `, entry.matchId, entry.gameId, entry.rulesVersion, entry.displayName, entry.seriesTarget, entry.createdAt, entry.expiresAt);
+  }
+
+  private async quickMatch(input: Record<string, unknown>): Promise<Response> {
+    const gameId = typeof input.gameId === "string" ? input.gameId : "";
+    const game = workerGames.get(gameId);
+    const provider = opponentProviderForGame(gameId);
+    const rulesVersion = input.rulesVersion;
+    const seriesTarget = input.seriesTarget;
+    const matchAnySeries = input.matchAnySeries === true;
+    if (!game || !provider) return json({ error: "unsupported-game" }, 404);
+    if (typeof rulesVersion !== "number" || !game.supportsRulesVersion(rulesVersion)) return json({ error: "unsupported-rules-version" }, 400);
+    if (seriesTarget !== 1 && seriesTarget !== 2 && seriesTarget !== 3) return json({ error: "invalid-series-target" }, 400);
+
+    const key = `${gameId}:${rulesVersion}`;
+    return this.serializeMatchmaking(key, async () => {
+      const candidates = this.ctx.storage.sql.exec<LobbyEntry>(`
+        SELECT match_id AS matchId, game_id AS gameId, rules_version AS rulesVersion,
+          display_name AS displayName, series_target AS seriesTarget, created_at AS createdAt, expires_at AS expiresAt
+        FROM public_rooms
+        WHERE game_id = ? AND rules_version = ? AND (? = 1 OR series_target = ?) AND expires_at > ?
+        ORDER BY created_at ASC, match_id ASC LIMIT 8
+      `, gameId, rulesVersion, matchAnySeries ? 1 : 0, seriesTarget, Date.now()).toArray();
+
+      for (const entry of candidates) {
+        const seatToken = token();
+        const matchStub = this.env.MATCHES.get(this.env.MATCHES.idFromName(entry.matchId));
+        try {
+          const joined = await matchStub.fetch(new Request("https://match.internal/join", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              seatTokenHash: await hash(seatToken), displayName: normalizeDisplayName(input.displayName, entry.matchId, 1),
+              clientSupportedGames: { [gameId]: [rulesVersion] }, clientRulesVersion: rulesVersion, now: Date.now(),
+            }),
+          }));
+          const payload = await joined.json() as Record<string, unknown>;
+          if (joined.ok) {
+            // The match room already claimed the seat. Directory reconciliation must
+            // never turn that success into a second room creation if cleanup fails.
+            try {
+              if (this.removeEntry(entry.matchId, gameId)) await this.schedule();
+            } catch { /* The match room is authoritative; stale entries expire independently. */ }
+            return json({ ...payload, seatToken, seat: "second", expiresAt: entry.expiresAt, seriesTarget: entry.seriesTarget, matched: true }, 200);
+          }
+          if (["room-expired", "room-unavailable", "room-full", "not-found"].includes(String(payload.error))) {
+            try {
+              if (this.removeEntry(entry.matchId, gameId)) await this.schedule();
+            } catch { /* Ignore directory cleanup failures and continue matching. */ }
+          }
+        } catch {
+          // Keep a transiently unreachable candidate indexed; its owning room remains authoritative.
+        }
+      }
+
+      const id = createId();
+      const seatToken = token();
+      const createdAt = Date.now();
+      const expiresAt = createdAt + ROOM_TTL_MS;
+      const aiFallbackAt = publicAiFallbackAt(createdAt, expiresAt);
+      const displayName = normalizeDisplayName(input.displayName, id, 0);
+      const match: Match = {
+        id, gameId, rulesVersion, visibility: "public", status: "waiting", createdAt, expiresAt,
+        retentionDeadline: null, aiFallbackAt,
+        revision: 0, state: null,
+        seats: [{ tokenHash: await hash(seatToken), displayName, connected: false, reconnectRemainingMs: game.getSessionPolicy(rulesVersion).reconnectDurationMs, disconnectedAt: null }, null],
+        countdownAt: null, turnDeadline: null, turnStartedAt: null, nextGameDeadline: null,
+        reconnectSeat: null, reconnectDeadline: null, pausedTurnMs: null, turnReceiptPending: false, turnReceiptStartedAt: null, outcome: null,
+        recentActions: {}, actionTimes: [[], []], seriesTarget, wins: { first: 0, second: 0 }, gameNumber: 0,
+        seriesStartingSeat: null, nextStartingSeat: null, nextReady: [false, false], rematchReady: [false, false],
+        closedSeats: [false, false], rematchCountdown: false, seriesWinner: null,
+      };
+      const stub = this.env.MATCHES.get(this.env.MATCHES.idFromName(id));
+      const created = await stub.fetch(new Request("https://match.internal/create", {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ match }),
+      }));
+      if (!created.ok) return json({ error: "match-create-failed" }, 503);
+      const entry: LobbyEntry = { matchId: id, gameId, rulesVersion, displayName, seriesTarget, createdAt, expiresAt };
+      let listed = false;
+      try {
+        this.upsertEntry(entry);
+        await this.schedule();
+        listed = true;
+        this.broadcastRoom({ type: "lobby-room-upsert", match: entry });
+      } catch { /* Preserve the created room and seat credentials if lobby indexing is unavailable. */ }
+      return json({ matchId: id, gameId, visibility: "public", seat: "first", seatToken, status: "waiting", expiresAt, seriesTarget, matched: false, aiFallbackAt, listed }, 201);
+    });
+  }
+
+  private removeEntry(matchId: string, gameId: GameId): boolean {
+    const result = this.ctx.storage.sql.exec("DELETE FROM public_rooms WHERE match_id = ?", matchId);
+    const removed = result.rowsWritten > 0;
+    if (removed) this.broadcastRoom({ type: "lobby-room-remove", matchId, gameId });
+    return removed;
   }
 
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
     const operation = url.pathname.split("/").at(-1);
+    if (operation === "quick-match" && request.method === "POST") {
+      const input = await body(request);
+      if (!input || typeof input !== "object" || Array.isArray(input)) return json({ error: "invalid-request" }, 400);
+      return this.quickMatch(input as Record<string, unknown>);
+    }
     if (operation === "socket" && request.headers.get("upgrade")?.toLowerCase() === "websocket") {
       const requestedGame = url.searchParams.get("gameId");
       if (requestedGame && !SUPPORTED_GAME_IDS.includes(requestedGame as GameId)) return json({ error: "unsupported-game" }, 404);
@@ -1422,30 +1667,25 @@ export class LobbyHubDurableObject {
       const input = await body(request);
       if (!input || typeof input !== "object" || Array.isArray(input)) return json({ error: "invalid-request" }, 400);
       const entry = input as Partial<LobbyEntry>;
+      const rulesVersion = entry.rulesVersion ?? workerGames.get(entry.gameId ?? "")?.rulesVersion ?? 1;
       if (typeof entry.matchId !== "string" || !ID_PATTERN.test(entry.matchId) || !entry.gameId || !SUPPORTED_GAME_IDS.includes(entry.gameId) ||
         typeof entry.displayName !== "string" || ![1, 2, 3].includes(entry.seriesTarget ?? 0) ||
-        !Number.isSafeInteger(entry.createdAt) || !Number.isSafeInteger(entry.expiresAt)) return json({ error: "invalid-entry" }, 400);
-      this.ctx.storage.sql.exec(`
-        INSERT INTO public_rooms (match_id, game_id, display_name, series_target, created_at, expires_at)
-        VALUES (?, ?, ?, ?, ?, ?)
-        ON CONFLICT(match_id) DO UPDATE SET
-          game_id = excluded.game_id,
-          display_name = excluded.display_name,
-          series_target = excluded.series_target,
-          created_at = excluded.created_at,
-          expires_at = excluded.expires_at
-      `, entry.matchId, entry.gameId, entry.displayName, entry.seriesTarget!, entry.createdAt!, entry.expiresAt!);
+        !Number.isSafeInteger(rulesVersion) || !Number.isSafeInteger(entry.createdAt) || !Number.isSafeInteger(entry.expiresAt)) return json({ error: "invalid-entry" }, 400);
+      const normalizedEntry: LobbyEntry = { ...entry as LobbyEntry, rulesVersion };
+      this.upsertEntry(normalizedEntry);
       await this.schedule();
-      this.broadcastRoom({ type: "lobby-room-upsert", match: entry as LobbyEntry });
+      this.broadcastRoom({ type: "lobby-room-upsert", match: normalizedEntry });
       return json({ ok: true }, 201);
     }
     if (operation === "remove" && request.method === "POST") {
       const matchId = url.searchParams.get("matchId");
       if (!matchId || !ID_PATTERN.test(matchId)) return json({ error: "invalid-match-id" }, 400);
       const existing = this.ctx.storage.sql.exec<{ gameId: GameId }>("SELECT game_id AS gameId FROM public_rooms WHERE match_id = ?", matchId).toArray()[0];
-      this.ctx.storage.sql.exec("DELETE FROM public_rooms WHERE match_id = ?", matchId);
-      await this.schedule();
-      if (existing) this.broadcastRoom({ type: "lobby-room-remove", matchId, gameId: existing.gameId });
+      const result = this.ctx.storage.sql.exec("DELETE FROM public_rooms WHERE match_id = ?", matchId);
+      if (result.rowsWritten > 0) {
+        if (existing) this.broadcastRoom({ type: "lobby-room-remove", matchId, gameId: existing.gameId });
+        try { await this.schedule(); } catch { /* Expiry filtering keeps the directory correct until its next alarm. */ }
+      }
       return json({ ok: true });
     }
     if (operation === "list" && request.method === "GET") {
@@ -1533,7 +1773,7 @@ export class LobbyHubDurableObject {
       const createdAt = Number(cursor.slice(0, separator));
       const matchId = cursor.slice(separator + 1);
       matches = this.ctx.storage.sql.exec<LobbyEntry>(`
-        SELECT match_id AS matchId, game_id AS gameId, display_name AS displayName,
+        SELECT match_id AS matchId, game_id AS gameId, rules_version AS rulesVersion, display_name AS displayName,
           series_target AS seriesTarget, created_at AS createdAt, expires_at AS expiresAt
         FROM public_rooms
         WHERE expires_at > ? AND (? IS NULL OR game_id = ?) AND (created_at < ? OR (created_at = ? AND match_id > ?))
@@ -1541,7 +1781,7 @@ export class LobbyHubDurableObject {
       `, now, gameId, gameId, createdAt, createdAt, matchId, limit + 1).toArray();
     } else {
       matches = this.ctx.storage.sql.exec<LobbyEntry>(`
-        SELECT match_id AS matchId, game_id AS gameId, display_name AS displayName,
+        SELECT match_id AS matchId, game_id AS gameId, rules_version AS rulesVersion, display_name AS displayName,
           series_target AS seriesTarget, created_at AS createdAt, expires_at AS expiresAt
         FROM public_rooms WHERE expires_at > ? AND (? IS NULL OR game_id = ?)
         ORDER BY created_at DESC, match_id ASC LIMIT ?

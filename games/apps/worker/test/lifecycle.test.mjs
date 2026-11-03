@@ -87,6 +87,26 @@ test("simultaneous intermission reconnect expiry cancels the series without a wi
   assert.equal(await storage.getAlarm(), result.retentionDeadline);
 });
 
+test("a due public fallback fills the open seat and uses the normal ready countdown", async () => {
+  const match = {
+    ...makeWaitingMatch("first-seat-token", now + 5 * 60_000),
+    gameId: "connect-four", rulesVersion: 2, aiFallbackAt: now,
+    seats: [
+      { tokenHash: "first-hash", kind: "human", displayName: "Host", connected: true, reconnectRemainingMs: 60_000, disconnectedAt: null },
+      null,
+    ],
+  };
+  const { object, values, storage } = makeObject(match);
+  await atTime(now, () => object.alarm());
+
+  const result = values.get("match");
+  assert.equal(result.status, "countdown");
+  assert.equal(result.seats[1].kind, "ai");
+  assert.equal(result.aiFallbackAt, null);
+  assert.equal(result.countdownAt, now + 2_000);
+  assert.equal(await storage.getAlarm(), now + 2_000);
+});
+
 test("leaving during a mutual-rematch countdown cancels only that rematch", async () => {
   const seatToken = "first-seat-token";
   const match = {
@@ -108,6 +128,35 @@ test("leaving during a mutual-rematch countdown cancels only that rematch", asyn
   assert.deepEqual(result.rematchReady, [false, false]);
   assert.deepEqual(result.closedSeats, [true, false]);
   assert.equal(result.seriesWinner, "first");
+});
+
+test("leaving a completed series cannot race with a rematch request", async () => {
+  for (const order of ["leave-first", "rematch-first"]) {
+    const firstToken = `first-${order}`;
+    const match = {
+      ...makeMatch({ firstDeadline: 60_000, secondDeadline: 60_000 }),
+      status: "completed", outcome: "win-first", seriesWinner: "first", nextGameDeadline: null,
+    };
+    match.seats[0].tokenHash = createHash("sha256").update(firstToken).digest("hex");
+    const { object, values } = makeObject(match);
+    const secondSocket = {
+      attachment: { authenticated: true, seat: "second" },
+      deserializeAttachment() { return this.attachment; },
+      serializeAttachment(value) { this.attachment = structuredClone(value); },
+      send() {}, close() {},
+    };
+    const leave = () => object.fetch(new Request("https://match.internal/leave-series", {
+      method: "POST", headers: { Authorization: `Bearer ${firstToken}` },
+    }));
+    const rematch = () => object.webSocketMessage(secondSocket, JSON.stringify({ type: "rematch" }));
+
+    await Promise.all(order === "leave-first" ? [leave(), rematch()] : [rematch(), leave()]);
+
+    const result = values.get("match");
+    assert.equal(result.status, "completed", `${order}: leaving must not be undone`);
+    assert.equal(result.rematchCountdown, false, `${order}: no rematch should remain active`);
+    assert.equal(result.closedSeats[0], true, `${order}: the leaving seat stays closed`);
+  }
 });
 
 test("a late host socket authentication expires the waiting room instead of starting it", async () => {

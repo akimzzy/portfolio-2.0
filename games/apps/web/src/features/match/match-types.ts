@@ -16,6 +16,7 @@ export type LiveMatch = {
   awaitingTurnReceipt?: { seat: PlayerSeat; deadline: number } | null;
   nextGameDeadline: number | null;
   expiresAt: number;
+  aiFallbackAt?: number | null;
   serverNow: number;
   seriesTarget: 1 | 2 | 3;
   wins: Readonly<{ first: number; second: number }>;
@@ -77,10 +78,11 @@ export function parseLiveMatch(value: unknown): LiveMatch | null {
   const nullableNumber = (entry: unknown) => entry === null || (typeof entry === 'number' && Number.isFinite(entry));
   const optionalSeats = (entry: unknown) => entry === undefined || (Array.isArray(entry) && entry.length === 2 && entry.every((item) => typeof item === 'boolean'));
   const validSeatKinds = value.seatKinds === undefined || (Array.isArray(value.seatKinds) && value.seatKinds.length === 2 && value.seatKinds.every((item) => item === 'human' || item === 'ai'));
+  const validAiFallback = value.aiFallbackAt === undefined || value.aiFallbackAt === null || Number.isFinite(value.aiFallbackAt);
   if (!isRecord(wins) || !Number.isSafeInteger(wins.first) || !Number.isSafeInteger(wins.second) ||
     !nullableNumber(value.countdownAt) || !nullableNumber(value.turnDeadline) || !nullableNumber(value.nextGameDeadline) ||
     !optionalSeats(value.connectedSeats) || !optionalSeats(value.nextReady) || !optionalSeats(value.rematchReady) || !optionalSeats(value.closedSeats) ||
-    !validSeatKinds) return null;
+    !validSeatKinds || !validAiFallback) return null;
   if (value.awaitingTurnReceipt !== undefined && value.awaitingTurnReceipt !== null &&
     (!isRecord(value.awaitingTurnReceipt) ||
       !isPlayerSeat(value.awaitingTurnReceipt.seat) ||

@@ -3,9 +3,8 @@ import LobbyApp from "../features/lobby/LobbyApp";
 import MatchApp from "../features/match/MatchApp";
 import { createGameController } from "./application-controller";
 import { lobbyClient } from "../features/lobby/lobby-client";
-import { inHouseMatchCount } from "../features/lobby/lobby-opponents";
-import { opponentProfilesForLobby } from "../games/opponents";
 import type { OpeningMatchView } from "./game-app-store";
+import { Button } from "../components/Button";
 
 export default function App() {
   const controller = useMemo(() => createGameController(), []);
@@ -156,8 +155,8 @@ function MatchOpening({ opening, onRetry, onBack }: {
       {opening.status === "loading" && <span className="opening-spinner" aria-hidden="true" />}
       <h2 id="match-opening-title">{opening.title}</h2>
       <p>{opening.message}</p>
-      {opening.action === "retry" && <button className="lobby-primary" type="button" onClick={onRetry}>Try again</button>}
-      {opening.action === "reload" && <button className="lobby-primary" type="button" onClick={() => window.location.reload()}>Reload game</button>}
+      {opening.action === "retry" && <Button variant="primary" type="button" onClick={onRetry}>Try again</Button>}
+      {opening.action === "reload" && <Button variant="primary" type="button" onClick={() => window.location.reload()}>Reload game</Button>}
       {opening.status === "error" && <button className="opening-back-button" type="button" onClick={onBack}>Back to games</button>}
     </div>
   </section>;
@@ -169,7 +168,6 @@ function LobbySummary() {
     return <p className="lobby-presence" role="status">{lobby.connection === "connecting" ? "Connecting…" : "Reconnecting…"}</p>;
   }
   if (lobby.totalMatches === null) return null;
-  const opponentCount = inHouseMatchCount(lobby.totalMatches, opponentProfilesForLobby(lobby.filter).length > 0);
-  const availableMatches = lobby.totalMatches + opponentCount;
+  const availableMatches = lobby.totalMatches + lobby.opponentOffers.length;
   return <p className="lobby-presence" aria-live="polite">{availableMatches} {availableMatches === 1 ? "match" : "matches"} available</p>;
 }

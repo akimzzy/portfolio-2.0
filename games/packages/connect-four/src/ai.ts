@@ -3,13 +3,20 @@ import type { ConnectFourState } from './index.js';
 
 type Candidate = { column: number; score: number };
 type Profile = { depth: number; nodes: number; center: number; attack: number; defense: number };
-export const CONNECT_FOUR_AI_ENGINE_VERSION = 1 as const;
+export const CONNECT_FOUR_AI_ENGINE_VERSION = 2 as const;
 
 const PROFILES: Record<ConnectFourOpponentId, Profile> = {
   standard: { depth: 4, nodes: 1_050, center: 3, attack: 1, defense: 1 },
   expert: { depth: 6, nodes: 1_200, center: 4, attack: 2, defense: 2 },
   defensive: { depth: 4, nodes: 1_350, center: 2, attack: 1, defense: 3 },
   aggressive: { depth: 4, nodes: 1_350, center: 3, attack: 3, defense: 1 },
+};
+
+const PROFILES_V2: Record<ConnectFourOpponentId, Profile> = {
+  standard: { depth: 4, nodes: 1_150, center: 3, attack: 2, defense: 2 },
+  expert: { depth: 6, nodes: 1_450, center: 3, attack: 2, defense: 2 },
+  defensive: { depth: 5, nodes: 1_300, center: 2, attack: 1, defense: 4 },
+  aggressive: { depth: 4, nodes: 1_300, center: 3, attack: 4, defense: 1 },
 };
 
 const ROWS = 6;
@@ -63,6 +70,16 @@ function winningColumns(board: Int8Array, heights: number[], player: number): nu
     undo(board, heights, column, row);
   }
   return wins;
+}
+
+function opponentCanCreateFork(board: Int8Array, heights: number[], opponent: number, player: number): boolean {
+  for (const column of legalColumns(heights)) {
+    const row = drop(board, heights, column, opponent);
+    const winsNext = winningColumns(board, heights, player).length === 0 && winningColumns(board, heights, opponent).length >= 2;
+    undo(board, heights, column, row);
+    if (winsNext) return true;
+  }
+  return false;
 }
 
 function scoreWindow(ours: number, theirs: number, profile: Profile): number {
@@ -153,13 +170,12 @@ function tieIndex(seed: number, ply: number, length: number): number {
  * Search is deterministic per match, bounded by profile node budgets, and has
  * no network, storage, timer, or third-party engine dependency.
  */
-function chooseConnectFourMoveV1(
+function chooseConnectFourMoveWithProfile(
   state: ConnectFourState,
   seat: 'first' | 'second',
-  profileId: ConnectFourOpponentId,
+  profile: Profile,
   seed: number,
 ): number {
-  const profile = PROFILES[profileId];
   const board = Int8Array.from(state.board.flatMap((row) => row.map((cell) => cell === 'first' ? 1 : cell === 'second' ? 2 : 0)));
   const heights = Array.from({ length: COLUMNS }, (_, column) => state.board.reduce((sum, row) => sum + (row[column] === null ? 0 : 1), 0));
   const legal = legalColumns(heights);
@@ -188,9 +204,81 @@ function chooseConnectFourMoveV1(
   return nearBest[tieIndex(seed, state.moves.length, nearBest.length)]!.column;
 }
 
+function chooseConnectFourMoveV1(
+  state: ConnectFourState,
+  seat: 'first' | 'second',
+  profileId: ConnectFourOpponentId,
+  seed: number,
+): number {
+  return chooseConnectFourMoveWithProfile(state, seat, PROFILES[profileId], seed);
+}
+
+/**
+ * A v2 root pass gives forced tactics priority before the bounded profile
+ * search. In particular, two simultaneous winning drops are a fork: a single
+ * opponent reply cannot occupy both columns. All simulations are local and
+ * bounded to the seven columns of the board.
+ */
+function chooseConnectFourMoveV2(
+  state: ConnectFourState,
+  seat: 'first' | 'second',
+  profileId: ConnectFourOpponentId,
+  seed: number,
+): number {
+  const board = Int8Array.from(state.board.flatMap((row) => row.map((cell) => cell === 'first' ? 1 : cell === 'second' ? 2 : 0)));
+  const heights = Array.from({ length: COLUMNS }, (_, column) => state.board.reduce((sum, row) => sum + (row[column] === null ? 0 : 1), 0));
+  const legal = legalColumns(heights);
+  if (!legal.length) throw new RangeError('No legal Connect Four move is available.');
+  const player = seatNumber(seat);
+  const opponent = player === 1 ? 2 : 1;
+  const ply = state.moves.length;
+
+  const immediateWins = winningColumns(board, heights, player);
+  if (immediateWins.length) return immediateWins[tieIndex(seed, ply, immediateWins.length)]!;
+  const opponentWins = winningColumns(board, heights, opponent);
+  // A single immediate threat must be blocked. If there are multiple, search
+  // the full legal set and choose the move with the best survival prospects.
+  if (opponentWins.length === 1) return opponentWins[0]!;
+
+  const safe: number[] = [];
+  const forkSafe: number[] = [];
+  const forks: number[] = [];
+  for (const column of legal) {
+    const row = drop(board, heights, column, player);
+    const opponentCanWin = winningColumns(board, heights, opponent).length > 0;
+    if (!opponentCanWin) {
+      safe.push(column);
+      const ownWinningDrops = winningColumns(board, heights, player).length;
+      if (ownWinningDrops >= 2) forks.push(column);
+      if (!opponentCanCreateFork(board, heights, opponent, player)) forkSafe.push(column);
+    }
+    undo(board, heights, column, row);
+  }
+
+  if (forks.length) return forks[tieIndex(seed, ply, forks.length)]!;
+  const candidates = forkSafe.length ? forkSafe : safe.length ? safe : legal;
+  const profile = PROFILES_V2[profileId];
+  const scored: Candidate[] = [];
+  let best = -Infinity;
+  const perCandidateBudget = Math.max(1, Math.ceil(profile.nodes / candidates.length));
+  for (const column of candidates) {
+    const row = drop(board, heights, column, player);
+    const budget = { nodes: 0, maximum: perCandidateBudget };
+    const value = isWin(board, row, column, player)
+      ? WIN
+      : search(board, heights, opponent, player, profile.depth - 1, -Infinity, Infinity, profile, budget);
+    undo(board, heights, column, row);
+    scored.push({ column, score: value });
+    best = Math.max(best, value);
+  }
+  const nearBest = scored.filter((candidate) => candidate.score >= best - 3);
+  return nearBest[tieIndex(seed, ply, nearBest.length)]!.column;
+}
+
 type ConnectFourMoveSelector = typeof chooseConnectFourMoveV1;
 const MOVE_SELECTORS: Readonly<Record<number, ConnectFourMoveSelector>> = Object.freeze({
   1: chooseConnectFourMoveV1,
+  2: chooseConnectFourMoveV2,
 });
 
 export function supportsConnectFourAiEngineVersion(engineVersion: number): boolean {

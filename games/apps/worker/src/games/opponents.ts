@@ -1,11 +1,12 @@
 import type { PlayerSeat } from '@portfolio-games/contracts';
 import { chooseConnectFourMoveForVersion, CONNECT_FOUR_AI_ENGINE_VERSION, supportsConnectFourAiEngineVersion } from '@portfolio-games/connect-four/ai';
-import { isConnectFourOpponentId } from '@portfolio-games/connect-four/opponents';
+import { CONNECT_FOUR_OPPONENTS, isConnectFourOpponentId } from '@portfolio-games/connect-four/opponents';
 
 export type WorkerOpponentProvider = Readonly<{
   gameId: string;
   currentEngineVersion: number;
   defaultProfileId: string;
+  profileIds: readonly string[];
   supportsEngineVersion(engineVersion: number): boolean;
   supportsProfile(profileId: unknown): profileId is string;
   chooseAction(state: unknown, seat: PlayerSeat, profileId: string, seed: number, engineVersion: number): unknown;
@@ -17,6 +18,7 @@ const providers: readonly WorkerOpponentProvider[] = Object.freeze([
     gameId: 'connect-four',
     currentEngineVersion: CONNECT_FOUR_AI_ENGINE_VERSION,
     defaultProfileId: 'standard',
+    profileIds: CONNECT_FOUR_OPPONENTS.map((profile) => profile.id),
     supportsEngineVersion: supportsConnectFourAiEngineVersion,
     supportsProfile: isConnectFourOpponentId,
     chooseAction(state: unknown, seat: PlayerSeat, profileId: string, seed: number, engineVersion: number) {

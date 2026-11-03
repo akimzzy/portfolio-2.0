@@ -12,10 +12,9 @@ import { clearQuickMessageHistory, readQuickMessageHistory, rememberQuickMessage
 import { Countdown } from '../../components/Countdown';
 import { showDialogWithoutActionFocus } from '../../shared/show-dialog';
 import { gameViews } from './game-views';
-import { opponentProfilesForGame } from '../../games/opponents';
 
 function getPlayerStatusLabel(match: ReturnType<typeof getMatchViewSnapshot>, player: (typeof match.players)[number]) {
-  if (match.aiThinking) return player.seat === match.aiSeat ? 'Thinking…' : 'Waiting';
+  if (match.aiThinking) return player.seat === match.aiSeat ? player.isSelf ? 'Your turn' : 'Their turn' : 'Waiting';
   if (match.turnReceipt?.seat === player.seat) return 'Syncing turn';
   const isTurnStatus = match.statusText === 'Your turn'
     || match.statusText === 'Move sent'
@@ -43,8 +42,6 @@ export default function MatchApp({ controller, connection }: { controller: GameC
   const [unconfirmedMessage, setUnconfirmedMessage] = useState<{ text: string; previousEventId: string | null; previousFeedbackId: number | null } | null>(null);
   const [chatSendStatus, setChatSendStatus] = useState('');
   const [chatActionError, setChatActionError] = useState('');
-  const [waitingAssistRoomId, setWaitingAssistRoomId] = useState<string | null>(null);
-  const [aiChooserOpen, setAiChooserOpen] = useState(false);
   const [messageHistory, setMessageHistory] = useState(readQuickMessageHistory);
   const messageRequestSequence = useRef(0);
   const closingResultForBoardReview = useRef(false);
@@ -53,24 +50,12 @@ export default function MatchApp({ controller, connection }: { controller: GameC
   const resultDialogRef = useRef<HTMLDialogElement>(null);
   const boardReviewToggleRef = useRef<HTMLButtonElement>(null);
   const onlineDialogRef = useRef<HTMLDialogElement>(null);
-  const aiChooserRef = useRef<HTMLDialogElement>(null);
   const GameBoard = gameViews[match.gameId];
   const optionsExpanded = match.onlineDialog?.optionsExpanded ?? false;
   const chatLength = Array.from(chatText.normalize('NFC').replace(/\s+/gu, ' ').trim()).length;
   const canReviewResultBoard = Boolean(match.dialog && ['local-result', 'online-between', 'online-complete'].includes(match.dialog.mode));
   const resultBoardReview = Boolean(reviewedResultDialog && reviewedResultDialog === match.dialog && canReviewResultBoard);
   const boardReviewDialog = resultBoardReview ? match.dialog : null;
-  const waitingAssistEligible = Boolean(match.matchId && match.status === 'waiting' &&
-    match.players.find((player) => player.seat === 'first')?.isSelf && !match.hasAiOpponent && connection.connected);
-  const showWaitingAssist = waitingAssistEligible && waitingAssistRoomId === match.matchId;
-
-  useEffect(() => {
-    if (!waitingAssistEligible || !match.matchId) return;
-    const roomId = match.matchId;
-    const timer = window.setTimeout(() => setWaitingAssistRoomId(roomId), 30_000);
-    return () => window.clearTimeout(timer);
-  }, [match.matchId, waitingAssistEligible]);
-
   useEffect(() => {
     const dialog = dialogRef.current;
     if (!dialog) return;
@@ -214,13 +199,6 @@ export default function MatchApp({ controller, connection }: { controller: GameC
     } else if (!match.onlineDialog && dialog.open) dialog.close();
   }, [match.onlineDialog]);
 
-  useEffect(() => {
-    const dialog = aiChooserRef.current;
-    if (!dialog) return;
-    if (aiChooserOpen && !dialog.open) showDialogWithoutActionFocus(dialog, window.matchMedia('(max-width: 700px), (orientation: landscape) and (max-height: 520px)').matches);
-    else if (!aiChooserOpen && dialog.open) dialog.close();
-  }, [aiChooserOpen]);
-
   return <>
     <section className="match-status-bar" aria-label="Match status and players">
     <div className={`connection-notice${connection.connected ? ' is-connected' : ''}${connection.visible ? '' : ' is-local'}${connection.shareVisible || connection.cancelVisible || connection.leaveVisible ? ' is-waiting-room' : ''}`}>
@@ -245,7 +223,7 @@ export default function MatchApp({ controller, connection }: { controller: GameC
         <span className={`player-token token-${player.seat}`} aria-hidden="true">{player.seat === 'first' ? '1' : '2'}</span>
         <span className="player-copy">
           <span className="player-name-line"><span className="player-name">{player.name}</span>{player.opponentNote && <span className="player-opponent-note">{player.opponentNote}</span>}</span>
-          <span className="player-status-line" aria-live="polite">{getPlayerStatusLabel(match, player)}{player.active && match.turnCountdown && <Countdown deadline={match.turnCountdown.deadline} clockOffset={match.turnCountdown.clockOffset} context="left in this turn" urgent onExpire={controller.refreshMatchStatus} />}{player.active && match.turnReceipt?.seat === player.seat && <Countdown deadline={match.turnReceipt.deadline} clockOffset={match.turnReceipt.clockOffset} context="to receive the move" />}</span>
+          <span className="player-status-line" aria-live="polite">{getPlayerStatusLabel(match, player)}{player.active && match.turnCountdown && <Countdown deadline={match.turnCountdown.deadline} clockOffset={match.turnCountdown.clockOffset} context="left in this turn" urgent {...(match.aiThinking ? {} : { onExpire: controller.refreshMatchStatus })} />}{player.active && match.turnReceipt?.seat === player.seat && <Countdown deadline={match.turnReceipt.deadline} clockOffset={match.turnReceipt.clockOffset} context="to receive the move" />}</span>
         </span>
         <span className="player-row-trailing">
           <span className="player-score" id={`score-${player.seat}`}>{player.score}</span>
@@ -268,15 +246,6 @@ export default function MatchApp({ controller, connection }: { controller: GameC
       })}
     </div>}
     </section>
-
-    {showWaitingAssist && <aside className="waiting-assist" aria-label="Waiting options">
-      <span>Still waiting?</span>
-      <div className="waiting-assist-actions">
-        <button className="lobby-primary" type="button" onClick={() => setAiChooserOpen(true)}>Choose opponent</button>
-        <button className="lobby-secondary" type="button" onClick={() => setWaitingAssistRoomId(null)}>Keep waiting</button>
-        <button className="waiting-assist-browse" type="button" onClick={controller.goToGames}>Browse matches</button>
-      </div>
-    </aside>}
 
     <section className={`game-layout${boardReviewDialog ? ' is-board-review' : ''}`} aria-label={`${match.gameId} game`}>
       <div className="board-section">
@@ -422,6 +391,7 @@ export default function MatchApp({ controller, connection }: { controller: GameC
             <svg aria-hidden="true" viewBox="0 0 20 20"><path d="m5 5 10 10M15 5 5 15" /></svg>
           </button>
         </div>
+        <div className="online-dialog-body">
         {match.onlineDialog.description && <p id="online-description">{match.onlineDialog.description}</p>}
         {(match.onlineDialog.mode === 'join' || match.onlineDialog.mode === 'opponent') && match.onlineDialog.showRules && <div className="join-match-rules" role="group" aria-label="Match rules">
           <strong>{match.onlineDialog.rulesSeries}</strong><span>{match.onlineDialog.rulesDetails}</span>
@@ -432,7 +402,14 @@ export default function MatchApp({ controller, connection }: { controller: GameC
           <small id="player-name-hint">Leave blank for a random name. Names must differ in a match.</small>
         </div>}
         {match.onlineDialog.mode === 'create' && <div className="match-create-form">
-          <p className="match-setup-summary">{match.onlineDialog.visibility === 'invite' ? 'Private' : 'Public'} · {match.onlineDialog.seriesTarget === 1 ? 'One game' : `First to win ${match.onlineDialog.seriesTarget}`}</p>
+          <fieldset className="visibility-options create-visibility-options">
+            <legend>Who can join?</legend>
+            {([{ value: 'public', title: 'Public', note: 'Anyone can join' }, { value: 'invite', title: 'Private', note: 'Invite link only' }] as const).map((option) => <label className="visibility-option" key={option.value}>
+              <input type="radio" name="room-visibility" value={option.value} checked={match.onlineDialog?.visibility === option.value} onChange={() => controller.updateOnlineForm('visibility', option.value)} />
+              <span><strong>{option.title}</strong><small>{option.note}</small></span>
+            </label>)}
+          </fieldset>
+          <p className="match-setup-summary">{match.onlineDialog.seriesTarget === 1 ? 'One game' : `First to win ${match.onlineDialog.seriesTarget}`}</p>
           <button className="match-options-toggle" type="button" aria-expanded={optionsExpanded} onClick={() => controller.updateOnlineForm('optionsExpanded', !optionsExpanded)}>{optionsExpanded ? 'Hide settings' : 'Match settings'}</button>
           {match.onlineDialog.optionsExpanded && <div id="match-create-options">
             <fieldset className="series-options">
@@ -444,13 +421,15 @@ export default function MatchApp({ controller, connection }: { controller: GameC
               </label>)}
               <p className="series-options-note">Ties add no wins.</p>
             </fieldset>
-            <fieldset className="visibility-options">
-              <legend>Who can join?</legend>
-              {([{ value: 'public', title: 'Public link', note: 'Anyone with the link can join' }, { value: 'invite', title: 'Private invite', note: 'Unlisted; only the invite link works' }] as const).map((option) => <label className="visibility-option" key={option.value}>
-                <input type="radio" name="room-visibility" value={option.value} checked={match.onlineDialog?.visibility === option.value} onChange={() => controller.updateOnlineForm('visibility', option.value)} />
-                <span><strong>{option.title}</strong><small>{option.note}</small></span>
+            {match.onlineDialog.visibility === 'public' && <fieldset className="series-options matchmaking-preference">
+              <legend>Pair with</legend>
+              {([{ value: false, label: 'Same series length' }, { value: true, label: 'Any series length' }] as const).map((option) => <label className="series-option" key={String(option.value)}>
+                <input type="radio" name="match-series-preference" checked={match.onlineDialog?.matchAnySeries === option.value} onChange={() => controller.updateOnlineForm('matchAnySeries', option.value)} />
+                <span className="series-option-copy"><strong>{option.label}</strong></span>
+                <span className="series-option-check" aria-hidden="true" />
               </label>)}
-            </fieldset>
+              {match.onlineDialog.matchAnySeries && <p className="series-options-note">If no room is waiting, your room uses the selected series length.</p>}
+            </fieldset>}
           </div>}
         </div>}
         {match.onlineDialog.mode === 'invite' && <div className="invite-link-row">
@@ -458,6 +437,7 @@ export default function MatchApp({ controller, connection }: { controller: GameC
           <button className="dialog-secondary" type="button" onClick={controller.copyInviteLink}>{match.onlineDialog.copyLabel}</button>
         </div>}
         {match.onlineDialog.error && <p className="online-error" id="online-error" role="status" aria-live="polite">{match.onlineDialog.error}</p>}
+        </div>
         <div className="dialog-actions online-actions">
           {match.onlineDialog.mode === 'create' && <button className="dialog-primary" type="button" disabled={match.onlineDialog.busy} onClick={controller.submitCreate}>{match.onlineDialog.busy ? 'Creating…' : 'Create match'}</button>}
           {match.onlineDialog.mode === 'join' && <button className="dialog-primary" type="button" disabled={match.onlineDialog.busy} onClick={controller.submitJoin}>{match.onlineDialog.busy ? 'Joining…' : 'Join game'}</button>}
@@ -467,17 +447,5 @@ export default function MatchApp({ controller, connection }: { controller: GameC
       </div>}
     </dialog>
 
-    <dialog className="game-dialog ai-opponent-dialog" ref={aiChooserRef} aria-labelledby="ai-opponent-title" onCancel={(event) => { event.preventDefault(); setAiChooserOpen(false); }} onClose={() => setAiChooserOpen(false)}>
-      <div className="dialog-content">
-        <div className="online-dialog-header"><h2 id="ai-opponent-title">Choose an opponent</h2><button className="dialog-close" type="button" aria-label="Close opponent choices" onClick={() => setAiChooserOpen(false)}><svg aria-hidden="true" viewBox="0 0 20 20"><path d="m5 5 10 10M15 5 5 15" /></svg></button></div>
-        <div className="ai-opponent-options">
-          {opponentProfilesForGame(match.gameId).map((opponent) => <button className="ai-opponent-option" key={`${opponent.gameId}:${opponent.id}`} type="button" onClick={() => {
-            setAiChooserOpen(false);
-            setWaitingAssistRoomId(null);
-            controller.switchWaitingMatchToOpponent(opponent.gameId, opponent.id);
-          }}><strong>{opponent.name}</strong><span>{opponent.style}</span></button>)}
-        </div>
-      </div>
-    </dialog>
   </>;
 }

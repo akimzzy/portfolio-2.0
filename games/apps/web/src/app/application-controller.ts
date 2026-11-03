@@ -20,12 +20,13 @@ import { createMatchViewSnapshot } from '../features/match/match-view-model.js';
 import type { GameController } from './controller-contract.js';
 import { clientGames, GAME_CATALOG, supportedGameVersions } from '../games/registry.js';
 import { isRegisteredOpponentProfile } from '../games/opponents.js';
+import { aiMoveDelay } from '../features/match/ai-presentation.js';
 
 type Theme = 'system' | 'light' | 'dark';
 type GameDialogMode = GameDialogView['mode'];
-type OnlineForm = { name: string; seriesTarget: 1 | 2 | 3; visibility: 'public' | 'invite'; optionsExpanded: boolean };
+type OnlineForm = { name: string; seriesTarget: 1 | 2 | 3; matchAnySeries: boolean; visibility: 'public' | 'invite'; optionsExpanded: boolean };
 type Multiplayer = OnlineMultiplayer;
-type CreateRoomInput = Readonly<{ visibility: 'public' | 'invite'; seriesTarget: 1 | 2 | 3; displayName: string }>;
+type CreateRoomInput = Readonly<{ visibility: 'public' | 'invite'; seriesTarget: 1 | 2 | 3; matchAnySeries: boolean; displayName: string }>;
 type GameDialogOptions = Pick<GameDialogView, 'mode' | 'title' | 'primaryLabel'> & Partial<Omit<GameDialogView, 'mode' | 'title' | 'primaryLabel'>>;
 type OnlineDialogOptions = Pick<OnlineDialogView, 'title'> & Partial<OnlineDialogView>;
 type PreviewError = Error & { code?: string };
@@ -74,6 +75,7 @@ let resultDialogTimer: number | null = null;
 let activityNotice: { eventId: string; seat: PlayerSeat; kind: 'reaction'; reactionId: MatchReactionId } |
   { eventId: string; seat: PlayerSeat; kind: 'message'; message: string } | null = null;
 let activityNoticeTimer: number | null = null;
+const seenActivityEventIds = new Set<string>();
 let hasUnreadActivity = false;
 let socialFeedback: { id: number; kind: 'error'; message: string } | null = null;
 let socialFeedbackTimer: number | null = null;
@@ -93,13 +95,13 @@ let onlineTransport: MatchTransport | null = null;
 let pendingOnlineMove: PendingOnlineMove | null = null;
 let pendingMoveTimer: number | null = null;
 let pendingMoveSyncRequested = false;
-let aiPresentation: { matchId: string; gameNumber: number; actionCount: number; thinking: boolean; reveal: boolean; revealStarted: boolean; delayMs: number } | null = null;
+let aiPresentation: { matchId: string; gameNumber: number; actionCount: number; thinking: boolean; reveal: boolean; revealStarted: boolean; delayMs: number; turnDeadline: number } | null = null;
 let aiPresentationTimer: number | null = null;
 let aiRevealTimer: number | null = null;
 let lastAiPresentationKey = '';
 let serverClockOffset = 0;
 let dialogMode: GameDialogMode = 'local-result';
-let onlineForm: OnlineForm = { name: '', seriesTarget: 2, visibility: 'public', optionsExpanded: false };
+let onlineForm: OnlineForm = { name: '', seriesTarget: 2, matchAnySeries: false, visibility: 'public', optionsExpanded: false };
 let opponentIntent: { gameId: string; profileId: string; opponentName: string; seriesTarget: 1 | 2 | 3 } | null = null;
 let activeMatchNotice = '';
 let checkingSavedMatch = false;
@@ -537,7 +539,7 @@ function updateMultiplayerUi() {
   if (multiplayer?.online) {
     const match = multiplayer.match;
     const statuses = {
-      waiting: match?.seatKinds?.includes('ai') ? 'Connected' : multiplayer.seat === 'first' ? 'Game link ready' : 'Joining game…',
+      waiting: match?.seatKinds?.includes('ai') ? 'Connected' : match?.aiFallbackAt ? 'Finding a player' : multiplayer.seat === 'first' ? 'Game link ready' : 'Joining game…',
       countdown: 'Connected',
       active: 'Connected',
       'between-games': 'Connected',
@@ -650,20 +652,44 @@ function clearAiPresentation() {
   lastAiPresentationKey = '';
 }
 
-function aiMoveDelay(): number {
-  const presets = [500, 650, 800, 950, 1_150, 1_400, 1_700, 2_050, 2_400, 2_700, 3_000];
-  return presets[Math.floor(Math.random() * presets.length)] ?? presets[0]!;
+function showActivityNotice(event: { eventId: string; seat: PlayerSeat; kind: 'reaction'; reactionId: MatchReactionId } |
+  { eventId: string; seat: PlayerSeat; kind: 'message'; message: string }) {
+  if (!multiplayer?.online) return;
+  if (seenActivityEventIds.has(event.eventId)) return;
+  seenActivityEventIds.add(event.eventId);
+  if (seenActivityEventIds.size > 64) seenActivityEventIds.delete(seenActivityEventIds.values().next().value!);
+  if (event.seat !== multiplayer.seat) hasUnreadActivity = true;
+  playNotes([659, 880], 'sine');
+  activityNotice = event;
+  if (activityNoticeTimer !== null) window.clearTimeout(activityNoticeTimer);
+  activityNoticeTimer = window.setTimeout(() => {
+    activityNoticeTimer = null;
+    activityNotice = null;
+    updateMatchViewSnapshot();
+  }, SOCIAL_ACTIVITY_DURATION_MS);
+  updateMatchViewSnapshot();
 }
 
-function beginAiMovePresentation(match: LiveMatch, actionCount: number, playedSeat: PlayerSeat) {
+function beginAiMovePresentation(match: LiveMatch, actionCount: number, playedSeat: PlayerSeat, turnDurationMs: number) {
   const key = `${match.matchId}:${match.gameNumber}:${actionCount}`;
   if (key === lastAiPresentationKey) return false;
   if (aiPresentationTimer !== null) window.clearTimeout(aiPresentationTimer);
   if (aiRevealTimer !== null) window.clearTimeout(aiRevealTimer);
   lastAiPresentationKey = key;
-  const delayMs = aiMoveDelay();
   const animationMs = window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 120 : 240;
-  aiPresentation = { matchId: match.matchId, gameNumber: match.gameNumber, actionCount, thinking: true, reveal: true, revealStarted: false, delayMs };
+  const awaitingReceipt = match.awaitingTurnReceipt;
+  const receiptDeadline = awaitingReceipt && multiplayer?.seat === awaitingReceipt.seat ? awaitingReceipt.deadline : null;
+  const receiptBudgetMs = receiptDeadline === null ? Number.POSITIVE_INFINITY : receiptDeadline - (Date.now() + serverClockOffset);
+  const delayMs = Math.min(aiMoveDelay(), Math.max(0, receiptBudgetMs - animationMs - 250));
+  // The Worker has already accepted the AI move, but the human's authoritative
+  // clock is held until the staged move is revealed and its receipt is acked.
+  // Use the game's normal turn duration for the AI-side presentation so both
+  // player cards keep the same countdown treatment without another server call.
+  aiPresentation = {
+    matchId: match.matchId, gameNumber: match.gameNumber, actionCount,
+    thinking: true, reveal: true, revealStarted: false, delayMs,
+    turnDeadline: Date.now() + turnDurationMs,
+  };
   aiPresentationTimer = window.setTimeout(() => {
     aiPresentationTimer = null;
     if (aiPresentation?.matchId !== match.matchId || aiPresentation.actionCount !== actionCount) return;
@@ -792,7 +818,9 @@ function updateFromServer(input: unknown, delivery: { syncId?: string; acceptedA
     const aiSeat = aiSeatIndex === 0 ? 'first' : aiSeatIndex === 1 ? 'second' : null;
     const shouldDelayAi = Boolean(previousMatch && (previousStatus === 'active' || previousStatus === 'countdown') &&
       ['active', 'between-games', 'completed'].includes(match.status) && aiSeat === playedSeat && actionDelta <= 2);
-    delayedAiAction = shouldDelayAi && beginAiMovePresentation(match, gameActionCount(), playedSeat);
+    delayedAiAction = shouldDelayAi && beginAiMovePresentation(
+      match, gameActionCount(), playedSeat, matchedGame.getSessionPolicy(match.rulesVersion).turnDurationMs,
+    );
     if (outcome?.kind === 'win' && previousOutcome === null && !delayedAiAction) {
       pendingWinSeat = outcome.winner;
       isRevealingWin = true;
@@ -859,20 +887,12 @@ function connectOnlineSocket() {
       },
       onMessage: (message) => {
         if (!multiplayer?.online) return;
-        if (message.type === 'match') updateFromServer(message.match, message);
-        else if (message.type === 'reaction' || message.type === 'quick-message') {
-          if (message.seat !== multiplayer.seat) hasUnreadActivity = true;
-          playNotes([659, 880], 'sine');
-          activityNotice = message.type === 'reaction'
+        if (message.type === 'match') {
+          updateFromServer(message.match, message);
+        } else if (message.type === 'reaction' || message.type === 'quick-message') {
+          showActivityNotice(message.type === 'reaction'
             ? { eventId: message.eventId, seat: message.seat, kind: 'reaction', reactionId: message.reactionId }
-            : { eventId: message.eventId, seat: message.seat, kind: 'message', message: message.message };
-          if (activityNoticeTimer !== null) window.clearTimeout(activityNoticeTimer);
-          activityNoticeTimer = window.setTimeout(() => {
-            activityNoticeTimer = null;
-            activityNotice = null;
-            updateMatchViewSnapshot();
-          }, SOCIAL_ACTIVITY_DURATION_MS);
-          updateMatchViewSnapshot();
+            : { eventId: message.eventId, seat: message.seat, kind: 'message', message: message.message });
         } else if ((message.type === 'reaction-rejected' || message.type === 'quick-message-rejected') && message.code === 'rate-limited') {
           showSocialError('Wait a moment before sending again.');
         } else if (message.type === 'quick-message-rejected' && message.code === 'invalid-message') {
@@ -932,16 +952,17 @@ async function enterOnlineMatch(matchId: string, seatToken: string, seat: Player
   updateMultiplayerUi();
 }
 
-async function createOnlineMatch({ visibility, seriesTarget, displayName }: CreateRoomInput) {
+async function createOnlineMatch({ visibility, seriesTarget, matchAnySeries, displayName }: CreateRoomInput) {
   updateOnlineDialog({ busy: true, error: 'Creating your game…' });
   try {
-    const creation = await matchCoordinator.createRoom({
-      gameId: currentGameId,
-      rulesVersion: currentGame().rulesVersion,
-      visibility,
-      seriesTarget,
-      displayName,
-    });
+    const creation = visibility === 'public'
+      ? await matchCoordinator.quickMatch({
+        gameId: currentGameId, rulesVersion: currentGame().rulesVersion, seriesTarget, matchAnySeries, displayName,
+      })
+      : await matchCoordinator.createRoom({
+        gameId: currentGameId, rulesVersion: currentGame().rulesVersion,
+        visibility, seriesTarget, displayName,
+      });
     if (creation.status === 'blocked') {
       showMatchLockNotice(creation.lock);
       return;
@@ -955,23 +976,26 @@ async function createOnlineMatch({ visibility, seriesTarget, displayName }: Crea
     const result = creation;
     returnToGamesAfterCreateDialog = false;
     rememberDisplayName(onlineForm.name);
-    const link = new URL(window.location.href);
-    link.search = '';
-    link.searchParams.set('match', result.matchId);
-    link.hash = visibility === 'invite' && result.inviteToken ? `invite=${encodeURIComponent(result.inviteToken)}` : '';
-    currentInviteLink = link.href;
-    matchSessionStorage.saveInviteLink(result.matchId, link.href);
-    presentOnlineDialog({ mode: 'invite', title: visibility === 'invite' ? 'Invite a friend' : 'Game link ready', inviteLink: link.href, closeLabel: 'Done' });
+    currentInviteLink = '';
+    if (visibility === 'invite') {
+      const link = new URL(window.location.href);
+      link.search = '';
+      link.searchParams.set('match', result.matchId);
+      link.hash = result.inviteToken ? `invite=${encodeURIComponent(result.inviteToken)}` : '';
+      currentInviteLink = link.href;
+      matchSessionStorage.saveInviteLink(result.matchId, link.href);
+      presentOnlineDialog({ mode: 'invite', title: 'Invite a friend', inviteLink: link.href, closeLabel: 'Done' });
+    } else onlineDialog.close();
     const cleanUrl = new URL(window.location.href);
     cleanUrl.search = `?match=${encodeURIComponent(result.matchId)}`;
     cleanUrl.hash = '';
     history.replaceState(null, '', cleanUrl);
     roomFromUrl = result.matchId;
     showGameView();
-    if (!result.listed && visibility === 'public') {
+    if (!result.listed && visibility === 'invite') {
       updateOnlineDialog({ error: 'Room created, but it could not be added to the public list. You can still share its link.' });
     }
-    await enterOnlineMatch(result.matchId, result.seatToken, 'first', displayName ?? '');
+    await enterOnlineMatch(result.matchId, result.seatToken, result.seat ?? 'first', displayName ?? '');
   } catch (error: unknown) {
     activeMatchNotice = '';
     renderActiveMatchBanner();
@@ -1215,15 +1239,16 @@ async function openCreateMatch(gameId = 'connect-four') {
   state = createCurrentState('first');
   round = 1;
   wins = { first: 0, second: 0 };
-  onlineForm = { ...onlineForm, seriesTarget: 2, visibility: 'public', optionsExpanded: false };
+  onlineForm = { ...onlineForm, seriesTarget: 2, matchAnySeries: false, visibility: 'public', optionsExpanded: false };
   clearPlayerNameError();
   showGameView();
   presentOnlineDialog({ mode: 'create', title: `Create a ${currentGame().title} match`, closeLabel: 'Close' });
 }
 
-function updateOnlineForm(field: 'name' | 'seriesTarget' | 'visibility' | 'optionsExpanded', value: string | number | boolean) {
+function updateOnlineForm(field: 'name' | 'seriesTarget' | 'matchAnySeries' | 'visibility' | 'optionsExpanded', value: string | number | boolean) {
   if (field === 'name' && typeof value === 'string') onlineForm.name = value.slice(0, 24);
   else if (field === 'seriesTarget' && (value === 1 || value === 2 || value === 3)) onlineForm.seriesTarget = value;
+  else if (field === 'matchAnySeries' && typeof value === 'boolean') onlineForm.matchAnySeries = value;
   else if (field === 'visibility' && (value === 'public' || value === 'invite')) onlineForm.visibility = value;
   else if (field === 'optionsExpanded' && typeof value === 'boolean') onlineForm.optionsExpanded = value;
   else return;
@@ -1341,49 +1366,6 @@ function playOpponentMatch(gameId: string, profileId: string, opponentName: stri
   });
 }
 
-async function switchWaitingMatchToOpponent(gameId: string, profileId: string) {
-  const current = multiplayer;
-  if (!current?.online || current.seat !== 'first' || current.match?.status !== 'waiting' ||
-    gameId !== currentGameId || !isRegisteredOpponentProfile(gameId, profileId)) return;
-  const displayName = current.displayName ?? chosenDisplayName();
-  try {
-    const result = await matchCoordinator.switchWaitingRoomToAi({
-      matchId: current.roomId, seatToken: current.seatToken, seat: 'first',
-      displayName: current.displayName, gameId: currentGameId,
-    }, {
-      gameId, profileId, seriesTarget: 2, displayName, opponentName: randomDisplayName(),
-    });
-    if (multiplayer !== current) return;
-    if (result.status === 'match-updated') {
-      updateFromServer(result.match);
-      announce('A player joined. Your match is ready.');
-      return;
-    }
-    if (result.status !== 'created') {
-      if (result.status === 'blocked') {
-        showMatchLockNotice(result.lock);
-        return;
-      }
-      showSocialError(result.message);
-      return;
-    }
-    leaveOnlineGame();
-    currentGameId = gameId;
-    state = createCurrentState('first');
-    round = 1;
-    wins = { first: 0, second: 0 };
-    const matchUrl = new URL(window.location.href);
-    matchUrl.search = `?match=${encodeURIComponent(result.matchId)}`;
-    matchUrl.hash = '';
-    history.replaceState(null, '', matchUrl);
-    roomFromUrl = result.matchId;
-    showGameView();
-    await enterOnlineMatch(result.matchId, result.seatToken, 'second', displayName);
-  } catch {
-    if (multiplayer === current) showSocialError('Could not switch matches. Check your connection and try again.');
-  }
-}
-
 function joinMatch(match: LobbyMatch) {
   if (match && /^[A-Za-z0-9_-]{22}$/.test(match.matchId) && GAME_CATALOG.some((game) => game.id === match.gameId)) {
     currentGameId = match.gameId;
@@ -1457,7 +1439,7 @@ function submitCreate() {
   unlockAudio();
   const displayName = chosenDisplayName();
   updateOnlineDialog({ busy: true, error: 'Preparing your game…' });
-  void createOnlineMatch({ visibility: onlineForm.visibility, seriesTarget: onlineForm.seriesTarget, displayName });
+  void createOnlineMatch({ visibility: onlineForm.visibility, seriesTarget: onlineForm.seriesTarget, matchAnySeries: onlineForm.matchAnySeries, displayName });
 }
 
 function submitOpponent() {
@@ -1522,6 +1504,7 @@ function updateMatchViewSnapshot() {
       reveal: Boolean(currentAiPresentation && currentAiPresentation.matchId === multiplayer?.roomId && currentAiPresentation.reveal),
       revealStarted: Boolean(currentAiPresentation && currentAiPresentation.matchId === multiplayer?.roomId && currentAiPresentation.revealStarted),
       delayMs: currentAiPresentation && currentAiPresentation.matchId === multiplayer?.roomId ? currentAiPresentation.delayMs : 0,
+      turnDeadline: currentAiPresentation && currentAiPresentation.matchId === multiplayer?.roomId ? currentAiPresentation.turnDeadline : null,
     },
     isRevealingWin,
     pendingWinSeat,
@@ -1540,7 +1523,7 @@ function updateMatchViewSnapshot() {
 function presentOnlineDialog(view: OnlineDialogOptions) {
   const defaults: OnlineDialogView = {
     mode: 'message', title: '', description: '', error: '', name: onlineForm.name, nameInvalid: false,
-    showRules: false, rulesSeries: '', rulesDetails: '', seriesTarget: onlineForm.seriesTarget,
+    showRules: false, rulesSeries: '', rulesDetails: '', seriesTarget: onlineForm.seriesTarget, matchAnySeries: onlineForm.matchAnySeries,
     visibility: onlineForm.visibility, optionsExpanded: onlineForm.optionsExpanded,
     inviteLink: '', copyLabel: 'Copy link', busy: false, closeLabel: 'Close',
   };
@@ -1641,7 +1624,10 @@ function openOnlineSeriesResult() {
   const otherSeat = multiplayer.seat === 'first' ? 'second' : 'first';
   const ownReady = match.rematchReady?.[ownIndex] ?? false;
   const opponentLeft = match.closedSeats?.[otherSeat === 'first' ? 0 : 1] ?? false;
-  const description = match.outcome?.startsWith('series-conceded-')
+  const opponentIsInHouse = match.seatKinds?.[otherSeat === 'first' ? 0 : 1] === 'ai';
+  const description = opponentLeft && opponentIsInHouse
+    ? `Final score ${match.wins.first}–${match.wins.second}. Your opponent has finished playing for now.`
+    : match.outcome?.startsWith('series-conceded-')
     ? `Final score ${match.wins.first}–${match.wins.second}. The other player conceded.`
     : `Final score ${match.wins.first}–${match.wins.second}.`;
   showGameDialog(makeGameDialog({
@@ -1682,6 +1668,7 @@ async function recreateExpiredRoom() {
   const roomSettings: CreateRoomInput = {
     visibility: expiredMatch.visibility,
     seriesTarget: expiredMatch.seriesTarget,
+    matchAnySeries: onlineForm.matchAnySeries,
     displayName: multiplayer.displayName ?? expiredMatch.playerNames?.[0] ?? '',
   };
   currentGameId = expiredMatch.gameId;
@@ -2155,7 +2142,6 @@ return {
   clearLobbyTabFocusRequest,
   createMatch,
   playOpponentMatch,
-  switchWaitingMatchToOpponent,
   joinMatch,
   resumeMatch,
   retryOpenMatch,

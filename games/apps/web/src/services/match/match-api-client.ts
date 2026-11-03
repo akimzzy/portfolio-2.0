@@ -27,6 +27,21 @@ export class MatchApiClient {
     });
   }
 
+  quickMatch(input: Readonly<{
+    gameId: string;
+    rulesVersion: number;
+    seriesTarget: number;
+    matchAnySeries?: boolean;
+    displayName: string;
+  }>): Promise<MatchApiResponse> {
+    return this.request('/v1/matches/quick', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(input),
+      signal: AbortSignal.timeout(8_000),
+    });
+  }
+
   createAiMatch(input: Readonly<{
     gameId: string;
     profileId: string;

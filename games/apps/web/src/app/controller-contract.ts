@@ -11,7 +11,6 @@ export type GameController = Readonly<{
   setLobbyTab(tab: 'matches' | 'games', focus?: boolean): void;
   createMatch(gameId: string): void;
   playOpponentMatch(gameId: string, profileId: string, opponentName: string, seriesTarget: 1 | 2 | 3): void;
-  switchWaitingMatchToOpponent(gameId: string, profileId: string): void;
   joinMatch(match: LobbyMatch): void;
   resumeMatch(): void;
   retryOpenMatch(): void;
@@ -34,7 +33,7 @@ export type GameController = Readonly<{
   submitOpponent(): void;
   submitJoin(): Promise<void>;
   retryOnlineDialog(): Promise<void>;
-  updateOnlineForm(field: 'name' | 'seriesTarget' | 'visibility' | 'optionsExpanded', value: string | number | boolean): void;
+  updateOnlineForm(field: 'name' | 'seriesTarget' | 'matchAnySeries' | 'visibility' | 'optionsExpanded', value: string | number | boolean): void;
   copyInviteLink(): Promise<void>;
   closeOnlineDialog(): void;
   dismissGameDialog(returnValue?: string): void;

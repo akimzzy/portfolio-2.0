@@ -29,6 +29,7 @@ export type OnlineDialogView = {
   rulesSeries: string;
   rulesDetails: string;
   seriesTarget: 1 | 2 | 3;
+  matchAnySeries: boolean;
   visibility: 'public' | 'invite';
   optionsExpanded: boolean;
   inviteLink: string;
