@@ -140,6 +140,13 @@ export function SiteHeader({ section = "home" }: { section?: "home" | "writing" 
             navigationTarget.current = "writing";
             setActiveSection("writing");
           }} aria-current={home && activeSection === "writing" ? "location" : !home && section === "writing" ? "page" : undefined} className={navigationLinkClass(home && activeSection === "writing" || !home && section === "writing")}>Articles</Link>
+          <a href="https://play.ake-em.com" target="_blank" rel="noopener noreferrer" aria-label="Play games (opens in a new tab)" className={`${navigationLinkClass(false)} gap-1`}>
+            Games
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" className="h-3 w-3 shrink-0">
+              <path d="M14 4h6v6m0-6-9 9" />
+              <path d="M18 13v5a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h5" />
+            </svg>
+          </a>
         </nav>
         <div className="col-start-2 row-start-1 sm:col-start-2"><ThemeSwitch /></div>
       </div>
