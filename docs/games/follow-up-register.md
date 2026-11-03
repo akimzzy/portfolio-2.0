@@ -10,7 +10,7 @@ This register keeps known follow-up work visible and separates confirmed defects
 - The 3 November workspace run passed all 108 checks (15 frontend, 93 contracts/game/Worker), including AI opponent behavior, matchmaking, rematches, reconnects, and two-client runtime synchronization. The production-configured web build passed.
 - The production Worker is version `8ab3c878-ec5e-4283-afe3-7cf3f71fefdb`. The latest Games UI deployment is [`7e203a40.portfolio-games-preview.pages.dev`](https://7e203a40.portfolio-games-preview.pages.dev/), served at [`play.ake-em.com`](https://play.ake-em.com/); the custom domain returned HTTP 200 with the final UI bundle. The latest deployment changed only the static UI; no Worker redeploy was needed for the AI-turn presentation countdown.
 - The owner reports completing multiple live matches with friends. Specific delayed-delivery/deadline, reconnect-after-backgrounding, production restart, and mobile Safari cases remain open verification rather than confirmed defects. The latest AI-turn countdown change passed build/tests, but its full interaction was not independently clicked through in a live match during that deployment.
-- The reviewed source checkpoint for this production release is being recorded and pushed on `origin/feature/multiplayer-games` before the next feature.
+- The reviewed production source checkpoint is commit [`21cb9f7`](https://github.com/akimzzy/portfolio-2.0/commit/21cb9f7), `Refine public matchmaking and in-house opponents`, pushed to `origin/feature/multiplayer-games`. The Pages and Worker deployments above correspond to the Games code in this checkpoint.
 
 ## Open verification
 
