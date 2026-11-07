@@ -3,6 +3,7 @@
   "references": [
     { "path": "./packages/contracts" },
     { "path": "./packages/connect-four" },
+    { "path": "./packages/reversi" },
     { "path": "./apps/worker" }
   ]
 }

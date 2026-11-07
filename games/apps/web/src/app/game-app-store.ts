@@ -25,6 +25,7 @@ export type GameAppSnapshot = Readonly<{
   announcement: string;
   activeMatch: ActiveMatchSummary;
   resumingMatch: boolean;
+  onlineSetupOpen: boolean;
   openingMatch: OpeningMatchView | null;
   lobbyError: string;
   controls: Readonly<{
@@ -64,6 +65,7 @@ const initialSnapshot: GameAppSnapshot = {
   announcement: '',
   activeMatch: null,
   resumingMatch: false,
+  onlineSetupOpen: false,
   openingMatch: null,
   lobbyError: '',
   controls: {

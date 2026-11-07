@@ -1,4 +1,5 @@
 import {
+  useState,
   useEffect,
   useRef,
   useSyncExternalStore,
@@ -9,6 +10,7 @@ import { GAME_CATALOG } from "../../games/registry";
 import type { GameController } from "../../app/controller-contract";
 import { showDialogWithoutActionFocus } from "../../shared/show-dialog";
 import { Button } from "../../components/Button";
+import { GameHowToPlay, type GameId } from "../match/GameHowToPlay";
 
 function seriesLabel(target: number): string {
   return target === 1 ? "One game" : `First to win ${target}`;
@@ -31,7 +33,9 @@ export default function LobbyApp({
   );
   const tab = app.lobbyTab;
   const dialogRef = useRef<HTMLDialogElement>(null);
+  const guideDialogRef = useRef<HTMLDialogElement>(null);
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const [guideGameId, setGuideGameId] = useState<GameId | null>(null);
   const filter = lobbyState.filter;
 
   useEffect(() => {
@@ -61,6 +65,13 @@ export default function LobbyApp({
     else url.searchParams.set("lobbyGame", filter);
     history.replaceState(null, "", url);
   }, [tab, filter]);
+
+  useEffect(() => {
+    const dialog = guideDialogRef.current;
+    if (!dialog) return;
+    if (guideGameId && !dialog.open) showDialogWithoutActionFocus(dialog);
+    else if (!guideGameId && dialog.open) dialog.close();
+  }, [guideGameId]);
 
   const filteredMatches = lobbyState.matches.filter(
     (match) => filter === "all" || match.gameId === filter,
@@ -346,6 +357,13 @@ export default function LobbyApp({
                     <span className="game-catalog-meta">
                       {game.playerCount}
                     </span>
+                    <button
+                      className="game-guide-link"
+                      type="button"
+                      onClick={() => setGuideGameId(game.id)}
+                    >
+                      How to play
+                    </button>
                   </div>
                 </div>
               </div>
@@ -403,6 +421,36 @@ export default function LobbyApp({
             )}
           </fieldset>
         </div>
+      </dialog>
+
+      <dialog
+        className="game-dialog game-guide-dialog"
+        ref={guideDialogRef}
+        aria-labelledby="lobby-guide-title"
+        onCancel={(event) => {
+          event.preventDefault();
+          setGuideGameId(null);
+        }}
+        onClose={() => setGuideGameId(null)}
+      >
+        {guideGameId && (
+          <div className="dialog-content">
+            <div className="online-dialog-header">
+              <h2 id="lobby-guide-title">
+                How to play {GAME_CATALOG.find((game) => game.id === guideGameId)?.title}
+              </h2>
+              <button
+                className="dialog-close"
+                type="button"
+                aria-label="Close game guide"
+                onClick={() => setGuideGameId(null)}
+              >
+                <svg aria-hidden="true" viewBox="0 0 20 20"><path d="m5 5 10 10M15 5 5 15" /></svg>
+              </button>
+            </div>
+            <GameHowToPlay gameId={guideGameId} />
+          </div>
+        )}
       </dialog>
     </>
   );

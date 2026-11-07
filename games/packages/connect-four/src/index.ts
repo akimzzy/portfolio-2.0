@@ -315,6 +315,9 @@ export const connectFour: TwoPlayerGameModule<
   getNextPlayer: (state: ConnectFourState) => state.nextPlayer,
   getStartingPlayer: (state: ConnectFourState) => state.startingPlayer,
   getActionCount: (state: ConnectFourState) => state.moves.length,
+  getLastActionPlayer: (state: ConnectFourState) => state.moves.length === 0 ? null : state.moves.length % 2 === 1
+    ? state.startingPlayer
+    : state.startingPlayer === "first" ? "second" : "first",
 });
 
 /** Type-erased adapter shared by the Worker and web platform registries. */

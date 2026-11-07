@@ -8,50 +8,60 @@ export type MatchApiResponse = Readonly<{
 /** Explicit HTTP operations for match setup and recovery; live match updates use MatchTransport. */
 export class MatchApiClient {
   private readonly baseUrl: string;
+  private readonly accountToken: () => string | null | Promise<string | null>;
 
-  constructor(baseUrl: string) {
+  constructor(baseUrl: string, accountToken: () => string | null | Promise<string | null> = () => null) {
     this.baseUrl = baseUrl.replace(/\/$/, '');
+    this.accountToken = accountToken;
   }
 
-  createMatch(input: Readonly<{
+  private async identityHeaders(): Promise<HeadersInit> {
+    const token = await this.accountToken();
+    return token ? { Authorization: `Bearer ${token}` } : {};
+  }
+
+  async createMatch(input: Readonly<{
     gameId: string;
     rulesVersion: number;
     visibility: string;
     seriesTarget: number;
     displayName: string;
   }>): Promise<MatchApiResponse> {
+    const identityHeaders = await this.identityHeaders();
     return this.request('/v1/matches', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...identityHeaders },
       body: JSON.stringify(input),
     });
   }
 
-  quickMatch(input: Readonly<{
+  async quickMatch(input: Readonly<{
     gameId: string;
     rulesVersion: number;
     seriesTarget: number;
     matchAnySeries?: boolean;
     displayName: string;
   }>): Promise<MatchApiResponse> {
+    const identityHeaders = await this.identityHeaders();
     return this.request('/v1/matches/quick', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...identityHeaders },
       body: JSON.stringify(input),
       signal: AbortSignal.timeout(8_000),
     });
   }
 
-  createAiMatch(input: Readonly<{
+  async createAiMatch(input: Readonly<{
     gameId: string;
     profileId: string;
     seriesTarget: number;
     displayName: string;
     opponentName: string;
   }>): Promise<MatchApiResponse> {
+    const identityHeaders = await this.identityHeaders();
     return this.request('/v1/matches/ai', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...identityHeaders },
       body: JSON.stringify(input),
       signal: AbortSignal.timeout(8_000),
     });
@@ -66,10 +76,11 @@ export class MatchApiClient {
     });
   }
 
-  joinMatch(matchId: string, input: Readonly<{ inviteToken: string | null; displayName: string | null; supportedGames: Readonly<Record<string, readonly number[]>> }>): Promise<MatchApiResponse> {
+  async joinMatch(matchId: string, input: Readonly<{ inviteToken: string | null; displayName: string | null; supportedGames: Readonly<Record<string, readonly number[]>> }>): Promise<MatchApiResponse> {
+    const identityHeaders = await this.identityHeaders();
     return this.request(`/v1/matches/${encodeURIComponent(matchId)}/join`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...identityHeaders },
       body: JSON.stringify(input),
     });
   }

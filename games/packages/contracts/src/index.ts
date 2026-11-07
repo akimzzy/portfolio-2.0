@@ -47,7 +47,7 @@ export type GameActionResult<TState, TCode extends string> =
   | Readonly<{ ok: true; value: TState }>
   | Readonly<{ ok: false; error: Readonly<{ code: TCode }> }>;
 
-/** Small contract for the initial two-player, alternating-turn games. */
+/** Small contract for turn-based two-player games. */
 export type TwoPlayerGameModule<
   TState,
   TAction,
@@ -69,6 +69,8 @@ export type TwoPlayerGameModule<
   getNextPlayer: (state: TState) => PlayerSeat | null;
   getStartingPlayer: (state: TState) => PlayerSeat;
   getActionCount: (state: TState) => number;
+  /** Seat that made the latest action; null before the first action. */
+  getLastActionPlayer?: (state: TState) => PlayerSeat | null;
 }>;
 
 /** A type-erased game module used only after data crosses a runtime boundary. */
@@ -93,6 +95,7 @@ export type RuntimeGameStateInfo = Readonly<{
   nextPlayer: PlayerSeat | null;
   startingPlayer: PlayerSeat;
   actionCount: number;
+  lastActionPlayer: PlayerSeat | null;
 }>;
 
 /** Keep generic game state typed inside its module; validate unknown inputs at the platform boundary. */
@@ -145,6 +148,7 @@ export function adaptTwoPlayerGame<
         nextPlayer: module.getNextPlayer(parsed.value),
         startingPlayer: module.getStartingPlayer(parsed.value),
         actionCount: module.getActionCount(parsed.value),
+        lastActionPlayer: module.getLastActionPlayer?.(parsed.value) ?? null,
       }) };
     },
     applyAction(state: unknown, player: PlayerSeat, action: unknown, rulesVersion: number): GameActionResult<unknown, string> {

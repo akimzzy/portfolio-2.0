@@ -1,4 +1,5 @@
 import { CONNECT_FOUR_OPPONENTS } from '@portfolio-games/connect-four/opponents';
+import { REVERSI_OPPONENTS } from '@portfolio-games/reversi/opponents';
 
 export type GameOpponentProfile = Readonly<{
   gameId: string;
@@ -9,7 +10,10 @@ export type GameOpponentProfile = Readonly<{
 
 /** Browser-safe opponent catalog. The lobby and match chooser use the same registry. */
 const profiles: readonly GameOpponentProfile[] = Object.freeze(
-  CONNECT_FOUR_OPPONENTS.map((profile) => Object.freeze({ gameId: 'connect-four', ...profile })),
+  [
+    ...CONNECT_FOUR_OPPONENTS.map((profile) => Object.freeze({ gameId: 'connect-four', ...profile })),
+    ...REVERSI_OPPONENTS.map((profile) => Object.freeze({ gameId: 'reversi', ...profile })),
+  ],
 );
 
 export function opponentProfilesForGame(gameId: string): readonly GameOpponentProfile[] {

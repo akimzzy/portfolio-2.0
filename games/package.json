@@ -9,6 +9,7 @@
   "workspaces": [
     "packages/contracts",
     "packages/connect-four",
+    "packages/reversi",
     "apps/worker"
   ],
   "scripts": {
@@ -24,7 +25,7 @@
     "deploy:web:production": "wrangler pages deploy apps/web/dist --project-name portfolio-games-preview --branch main",
     "deploy:web:preview": "wrangler pages deploy apps/web/dist --project-name portfolio-games-preview --branch preview",
     "deploy:web:react-preview": "wrangler pages deploy apps/web/dist --project-name portfolio-games-preview --branch react-preview",
-    "test": "npm run build && node --experimental-strip-types --test apps/web/test/*.test.mjs && node --test packages/contracts/test/*.test.mjs packages/connect-four/test/*.test.mjs apps/worker/test/*.test.mjs",
+    "test": "npm run build && node --experimental-strip-types --test apps/web/test/*.test.mjs && node --test packages/contracts/test/*.test.mjs packages/connect-four/test/*.test.mjs packages/reversi/test/*.test.mjs apps/worker/test/*.test.mjs",
     "check": "npm test"
   },
   "devDependencies": {
@@ -37,6 +38,7 @@
     "ws": "8.21.0"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.119.0",
     "react": "^19.3.0",
     "react-dom": "^19.3.0"
   }

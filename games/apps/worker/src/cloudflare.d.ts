@@ -28,6 +28,11 @@ interface WorkerEnv {
   LOBBY_HUB: DurableObjectNamespace<DurableObjectStub>;
   ROOMS_RATE_LIMITER: RateLimitBinding;
   ALLOWED_ORIGINS: string;
+  SUPABASE_URL?: string;
+  SUPABASE_ANON_KEY?: string;
+  SUPABASE_SECRET_KEY?: string;
+  /** Legacy JWT key; prefer SUPABASE_SECRET_KEY. */
+  SUPABASE_SERVICE_ROLE_KEY?: string;
 }
 interface WebSocketPair { 0: WebSocket; 1: WebSocket; }
 declare const WebSocketPair: { new (): WebSocketPair };

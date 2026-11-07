@@ -5,6 +5,8 @@ import { createGameController } from "./application-controller";
 import { lobbyClient } from "../features/lobby/lobby-client";
 import type { OpeningMatchView } from "./game-app-store";
 import { Button } from "../components/Button";
+import { AccountControl } from "../features/account/AccountControl";
+import { accountSession } from "../features/account/account-session";
 
 export default function App() {
   const controller = useMemo(() => createGameController(), []);
@@ -13,6 +15,11 @@ export default function App() {
     controller.store.getSnapshot,
     controller.store.getSnapshot,
   );
+
+  useEffect(() => {
+    accountSession.start();
+    return () => accountSession.stop();
+  }, []);
 
   useEffect(() => {
     controller.start();
@@ -40,7 +47,7 @@ export default function App() {
             {gameScreen ? app.description && <p aria-live="polite">{app.description}</p> : <LobbySummary />}
           </div>
           <div className="header-actions">
-            {app.controls.homeVisible && (
+            {app.controls.homeVisible && !app.onlineSetupOpen && (
               <button
                 className="games-home-button"
                 type="button"
@@ -54,7 +61,7 @@ export default function App() {
                 <span>Games</span>
               </button>
             )}
-            {app.controls.playOnlineVisible && (
+            {app.controls.playOnlineVisible && !app.onlineSetupOpen && (
               <button
                 className="multiplayer-button"
                 type="button"
@@ -69,7 +76,7 @@ export default function App() {
                 <span>{app.controls.playOnlineLabel}</span>
               </button>
             )}
-            {app.controls.newGameVisible && (
+            {app.controls.newGameVisible && !app.onlineSetupOpen && (
               <button
                 className="new-game-button"
                 type="button"
@@ -119,6 +126,7 @@ export default function App() {
                 <path d="M10 4a6 6 0 0 1 0 12Z" />
               </svg>
             </button>
+            {app.screen === "lobby" && <AccountControl />}
           </div>
         </div>
       </header>

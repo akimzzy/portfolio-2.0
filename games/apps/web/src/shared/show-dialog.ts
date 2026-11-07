@@ -1,10 +1,9 @@
-/** Open a dialog without focusing one of its actions or fields. */
+/** Open a dialog without leaving focus on one of its actions or fields. */
 export function showDialogWithoutActionFocus(dialog: HTMLDialogElement, modal = true) {
   // Native dialog opening focuses the first focusable descendant by default.
-  // Making the dialog itself the autofocus target keeps keyboard focus in the
-  // dialog without visually preselecting an action.
+  // Keep keyboard focus on the dialog container so no action looks preselected.
   dialog.tabIndex = -1;
-  dialog.setAttribute('autofocus', '');
   if (modal) dialog.showModal();
   else dialog.show();
+  dialog.focus({ preventScroll: true });
 }

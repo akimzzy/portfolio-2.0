@@ -8,6 +8,7 @@ import path from "node:path";
 import test from "node:test";
 import WebSocket from "ws";
 import { RULES_VERSION } from "@portfolio-games/connect-four";
+import { legalMoves as legalReversiMoves, RULES_VERSION as REVERSI_RULES_VERSION } from "@portfolio-games/reversi";
 
 const gamesRoot = path.resolve(import.meta.dirname, "../../..");
 const origin = "http://localhost:4178";
@@ -381,6 +382,148 @@ test("AI matches start on demand and make a server-authoritative reply in the sa
   const quickMessage = client.waitFor((payload) => payload.type === "quick-message" && payload.seat === "second");
   client.send({ type: "quick-message", message: "Nice move!" });
   assert.equal((await quickMessage).message, "Nice move!");
+});
+
+test("Reversi is registered end to end and its server AI returns a legal reply", { timeout: 30_000 }, async (t) => {
+  const port = await unusedPort();
+  const persistencePath = await mkdtemp(path.join(os.tmpdir(), "portfolio-games-reversi-"));
+  let worker;
+  const clients = [];
+  t.after(async () => {
+    clients.forEach((client) => client.close());
+    if (worker) await stopWorker(worker.process);
+    await rm(persistencePath, { recursive: true, force: true });
+  });
+
+  worker = await startWorker(port, persistencePath);
+  const created = await api(worker.baseUrl, "/v1/matches/ai", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ gameId: "reversi", rulesVersion: REVERSI_RULES_VERSION, profileId: "expert", seriesTarget: 1, displayName: "Test Player" }),
+  });
+  assert.equal(created.response.status, 201);
+  const client = socketClient(worker.baseUrl, created.body.matchId, created.body.seatToken);
+  clients.push(client);
+  await client.openAndAuthenticate();
+  const activeEvent = await client.waitFor((payload) => payload.type === "match" && payload.match.status === "active" && payload.match.state !== null);
+  let active = activeEvent.match;
+  if (active.awaitingTurnReceipt?.seat === "second") {
+    client.send({ type: "turn-received", revision: active.revision });
+    active = (await client.waitFor((payload) => payload.type === "match" && payload.match.status === "active" && payload.match.turnDeadline !== null)).match;
+  }
+  assert.equal(active.state.nextPlayer, "second");
+  const firstAction = legalReversiMoves(active.state, "second")[0];
+  assert.ok(firstAction);
+  const accepted = client.waitFor((payload) => payload.acceptedActionId === "reversi-human-first-move");
+  client.send({
+    protocolVersion: 1, type: "submit-action", gameId: "reversi", rulesVersion: REVERSI_RULES_VERSION,
+    matchId: created.body.matchId, actionId: "reversi-human-first-move", expectedRevision: active.revision,
+    action: firstAction,
+  });
+  const response = await accepted;
+  assert.equal(response.match.status, "active");
+  assert.equal(response.match.state.moves.length, active.state.moves.length + 2);
+  assert.equal(response.match.state.nextPlayer, "second");
+  assert.equal(response.match.state.moves.at(-1).seat, "first");
+});
+
+test("two Reversi players synchronize legal moves through the authoritative room", { timeout: 30_000 }, async (t) => {
+  const port = await unusedPort();
+  const persistencePath = await mkdtemp(path.join(os.tmpdir(), "portfolio-games-reversi-human-match-"));
+  let worker;
+  const clients = [];
+  t.after(async () => {
+    clients.forEach((client) => client.close());
+    if (worker) await stopWorker(worker.process);
+    await rm(persistencePath, { recursive: true, force: true });
+  });
+
+  worker = await startWorker(port, persistencePath);
+  const created = await api(worker.baseUrl, "/v1/matches", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ gameId: "reversi", rulesVersion: REVERSI_RULES_VERSION, visibility: "public", seriesTarget: 1, displayName: "First Player" }),
+  });
+  assert.equal(created.response.status, 201);
+  const joined = await api(worker.baseUrl, `/v1/matches/${created.body.matchId}/join`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ rulesVersion: REVERSI_RULES_VERSION, supportedGames: { reversi: [REVERSI_RULES_VERSION] }, displayName: "Second Player" }),
+  });
+  assert.equal(joined.response.status, 200, JSON.stringify(joined.body));
+
+  let first = socketClient(worker.baseUrl, created.body.matchId, created.body.seatToken);
+  const second = socketClient(worker.baseUrl, created.body.matchId, joined.body.seatToken);
+  clients.push(first, second);
+  await Promise.all([first.openAndAuthenticate(), second.openAndAuthenticate()]);
+
+  const active = await first.waitFor((payload) => payload.type === "match" && payload.match.status === "active" && payload.match.state !== null);
+  let match = active.match;
+  for (let actionNumber = 0; actionNumber < 8 && match.state.outcome === null; actionNumber += 1) {
+    if (match.awaitingTurnReceipt) {
+      const revision = match.revision;
+      const readyEvents = Promise.all(clients.map((client) => client.waitFor((payload) =>
+        payload.type === "match" && payload.match.revision > revision && payload.match.turnDeadline !== null && payload.match.awaitingTurnReceipt === null,
+      )));
+      const current = match.awaitingTurnReceipt.seat === "first" ? first : second;
+      current.send({ type: "turn-received", revision });
+      const ready = await readyEvents;
+      match = ready.reduce((latest, event) => event.match.revision > latest.revision ? event.match : latest, ready[0].match);
+    }
+
+    assert.equal(match.status, "active");
+    const seat = match.state.nextPlayer;
+    assert.ok(seat === "first" || seat === "second");
+    const player = seat === "first" ? first : second;
+    const legal = legalReversiMoves(match.state, seat);
+    assert.ok(legal.length > 0, "the authoritative state must not leave an active player without a legal move");
+    const index = (Math.imul(1 + match.state.moves.length, 2654435761) >>> 0) % legal.length;
+    const action = legal[index];
+    const actionId = `reversi-human-${actionNumber}`;
+    const accepted = player.waitFor((payload) => payload.acceptedActionId === actionId);
+    const opponent = player === first ? second : first;
+    const synchronized = opponent.waitFor((payload) => payload.type === "match" && payload.match.revision > match.revision);
+    player.send({
+      protocolVersion: 1, type: "submit-action", gameId: "reversi", rulesVersion: REVERSI_RULES_VERSION,
+      matchId: created.body.matchId, actionId, expectedRevision: match.revision, action,
+    });
+    const [acceptedEvent, synchronizedEvent] = await Promise.all([accepted, synchronized]);
+    match = acceptedEvent.match;
+    assert.equal(synchronizedEvent.match.revision, match.revision);
+    assert.deepEqual(synchronizedEvent.match.state, match.state);
+  }
+
+  assert.equal(match.status, "active");
+  assert.equal(match.state.moves.length, 8);
+  assert.equal(match.state.skippedSeat, null);
+
+  const disconnected = second.waitFor((payload) => payload.type === "match" && payload.match.connectedSeats?.[0] === false);
+  first.close();
+  await disconnected;
+  const replacement = socketClient(worker.baseUrl, created.body.matchId, created.body.seatToken);
+  clients.push(replacement);
+  const restored = await replacement.openAndAuthenticate();
+  first = replacement;
+  match = restored.match;
+  assert.equal(match.connectedSeats?.every(Boolean), true);
+  assert.equal(match.state.moves.length, 8, "reconnect should restore the authoritative Reversi board");
+
+  const completed = second.waitFor((payload) => payload.type === "match" && payload.match.status === "completed");
+  first.send({ type: "resign" });
+  match = (await completed).match;
+  assert.equal(match.seriesWinner, "second");
+  assert.deepEqual(match.wins, { first: 0, second: 1 });
+
+  const firstCountdown = first.waitFor((payload) => payload.type === "match" && payload.match.status === "countdown" && payload.match.rematchCountdown);
+  const secondCountdown = second.waitFor((payload) => payload.type === "match" && payload.match.status === "countdown" && payload.match.rematchCountdown);
+  first.send({ type: "rematch" });
+  second.send({ type: "rematch" });
+  const [firstStarting, secondStarting] = await Promise.all([firstCountdown, secondCountdown]);
+  assert.equal(firstStarting.match.revision, secondStarting.match.revision);
+
+  const nextFirst = first.waitFor((payload) => payload.type === "match" && payload.match.revision > firstStarting.match.revision && payload.match.status === "active" && payload.match.gameNumber === 1 && payload.match.state?.moves.length === 0, 15_000);
+  const nextSecond = second.waitFor((payload) => payload.type === "match" && payload.match.revision > secondStarting.match.revision && payload.match.status === "active" && payload.match.gameNumber === 1 && payload.match.state?.moves.length === 0, 15_000);
+  const [nextFirstEvent, nextSecondEvent] = await Promise.all([nextFirst, nextSecond]);
+  assert.equal(nextFirstEvent.match.state.board.flat().filter(Boolean).length, 4);
+  assert.deepEqual(nextFirstEvent.match.wins, { first: 0, second: 0 });
+  assert.equal(nextSecondEvent.match.revision, nextFirstEvent.match.revision);
 });
 
 test("public quick matches pair compatible humans atomically and keep settings isolated", { timeout: 30_000 }, async (t) => {

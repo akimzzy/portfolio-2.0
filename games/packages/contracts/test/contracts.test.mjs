@@ -67,7 +67,7 @@ test("game registry validates version support and returns one validated state su
   const inspected = game.inspectState(initial, 1);
   assert.equal(inspected.ok, true);
   assert.deepEqual(inspected.value, {
-    state: initial, outcome: null, nextPlayer: "first", startingPlayer: "first", actionCount: 0,
+    state: initial, outcome: null, nextPlayer: "first", startingPlayer: "first", actionCount: 0, lastActionPlayer: null,
   });
   assert.ok(Object.isFrozen(inspected.value));
 

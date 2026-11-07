@@ -55,6 +55,7 @@ export type PendingOnlineMove = Readonly<{
   previousStateKey: string;
   seat: PlayerSeat;
   expectedRevision: number;
+  retryCount?: number;
 }>;
 
 type RecordValue = Record<string, unknown>;

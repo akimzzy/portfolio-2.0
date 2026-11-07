@@ -2,6 +2,7 @@ import { invalid, isMatchReactionId, normalizeQuickMessage, parseActionCommand }
 import type { ActionCommand, PlayerSeat, RuntimeTwoPlayerGame, ValidationResult } from "@portfolio-games/contracts";
 import { workerGames } from "./games/registry.js";
 import { opponentProviderForGame, opponentProviderForVersion } from "./games/opponents.js";
+import { resolveAccountIdentity } from "./account-identity.js";
 
 const DEFAULT_TURN_DURATION_MS = 45_000;
 const DEFAULT_RECONNECT_DURATION_MS = 60_000;
@@ -25,7 +26,7 @@ type Visibility = "public" | "invite";
 type GameId = string;
 const SUPPORTED_GAME_IDS = workerGames.entries.map((game) => game.gameId);
 type Status = "waiting" | "countdown" | "active" | "between-games" | "completed" | "cancelled" | "expired";
-type Seat = { tokenHash: string | null; kind?: "human" | "ai"; aiProfileId?: string; displayName?: string; connected: boolean; reconnectRemainingMs: number; disconnectedAt: number | null; turnReceiptSupported?: boolean };
+type Seat = { tokenHash: string | null; kind?: "human" | "ai"; aiProfileId?: string; accountId?: string | null; displayName?: string; connected: boolean; reconnectRemainingMs: number; disconnectedAt: number | null; turnReceiptSupported?: boolean };
 type Match = {
   id: string; gameId: GameId; rulesVersion: number; visibility: Visibility; status: Status; createdAt: number; expiresAt: number;
   retentionDeadline?: number | null;
@@ -38,6 +39,7 @@ type Match = {
   turnReceiptStartedAt?: number | null;
   outcome: string | null; recentActions: Record<string, unknown>; actionTimes: [number[], number[]];
   seriesTarget: 1 | 2 | 3; wins: { first: number; second: number }; gameNumber: number;
+  seriesNumber: number; persistedSeriesNumber?: number; seriesCompletedAt?: number | null;
   seriesStartingSeat: PlayerSeat | null; nextStartingSeat: PlayerSeat | null;
   nextReady: [boolean, boolean]; rematchReady: [boolean, boolean]; closedSeats: [boolean, boolean];
   rematchCountdown: boolean; seriesWinner: PlayerSeat | null;
@@ -62,6 +64,56 @@ function sessionPolicy(match: Pick<Match, 'gameId' | 'rulesVersion'>) {
     turnDurationMs: DEFAULT_TURN_DURATION_MS,
     reconnectDurationMs: DEFAULT_RECONNECT_DURATION_MS,
   };
+}
+
+type GameHistoryRow = Readonly<{
+  completion_id: string;
+  user_id: string;
+  game_id: string;
+  rules_version: number;
+  result: "win" | "loss";
+  opponent_name: string;
+  wins: number;
+  losses: number;
+  series_target: number;
+  finish_reason: "normal" | "timeout" | "disconnect" | "forfeit";
+  completed_at: string;
+}>;
+
+function gameHistoryRows(match: Match): GameHistoryRow[] {
+  if (match.status !== "completed" || !match.seriesWinner) return [];
+  const accountIds = match.seats.flatMap((seat) => seat?.accountId ? [seat.accountId] : []);
+  if (new Set(accountIds).size !== accountIds.length) return [];
+  const winnerIndex = match.seriesWinner === "first" ? 0 : 1;
+  const completionId = `${match.id}:${match.seriesNumber}`;
+  const finishReason: GameHistoryRow["finish_reason"] = match.outcome?.startsWith("reconnect-timeout-")
+    ? "disconnect"
+    : match.outcome?.startsWith("timeout-") ? "timeout"
+      : match.outcome?.startsWith("resigned-") || match.outcome?.startsWith("series-conceded-") ? "forfeit"
+        : "normal";
+  const completedAt = new Date(match.seriesCompletedAt ?? Date.now()).toISOString();
+  return match.seats.flatMap((seat, index) => {
+    if (!seat?.accountId || !/^[0-9a-f-]{36}$/i.test(seat.accountId)) return [];
+    const opponent = match.seats[index === 0 ? 1 : 0];
+    const isFirst = index === 0;
+    return [{
+      completion_id: completionId,
+      user_id: seat.accountId,
+      game_id: match.gameId,
+      rules_version: match.rulesVersion,
+      result: index === winnerIndex ? "win" : "loss",
+      opponent_name: normalizeDisplayName(opponent?.displayName, match.id, index === 0 ? 1 : 0),
+      wins: isFirst ? match.wins.first : match.wins.second,
+      losses: isFirst ? match.wins.second : match.wins.first,
+      series_target: match.seriesTarget,
+      finish_reason: finishReason,
+      completed_at: completedAt,
+    } satisfies GameHistoryRow];
+  });
+}
+
+function supabaseServerKey(env: WorkerEnv): string | null {
+  return env.SUPABASE_SECRET_KEY?.trim() || env.SUPABASE_SERVICE_ROLE_KEY?.trim() || null;
 }
 
 /** Exact per-game support avoids comparing unrelated games' rules-version numbers. */
@@ -239,6 +291,11 @@ function normalizeMatch(match: Match): Match {
       displayName: normalizeDisplayName(seat.displayName, match.id, index),
     } : null) as Match['seats'],
     seriesTarget: target, wins, gameNumber: Number.isSafeInteger(match.gameNumber) ? match.gameNumber : 1,
+    seriesNumber: Number.isSafeInteger(match.seriesNumber) && match.seriesNumber > 0 ? match.seriesNumber : 1,
+    persistedSeriesNumber: typeof match.persistedSeriesNumber === "number" && Number.isSafeInteger(match.persistedSeriesNumber) && match.persistedSeriesNumber >= 0
+      ? match.persistedSeriesNumber : 0,
+    seriesCompletedAt: typeof match.seriesCompletedAt === "number" && Number.isFinite(match.seriesCompletedAt)
+      ? match.seriesCompletedAt : null,
     nextGameDeadline: Number.isFinite(match.nextGameDeadline)
       ? match.nextGameDeadline
       : match.status === "between-games" ? now + NEXT_GAME_TIMEOUT_MS : null,
@@ -343,6 +400,8 @@ export default {
       const input = await body(request);
       if (!input || typeof input !== "object" || Array.isArray(input)) return json({ error: "invalid-request" }, 400, headers);
       const values = input as Record<string, unknown>;
+      const account = await resolveAccountIdentity(request, env);
+      if (!account.ok) return json(await account.response.json(), account.response.status, headers);
       const gameId = typeof values.gameId === "string" ? values.gameId : "connect-four";
       const game = workerGames.get(gameId);
       if (!game) return json({ error: "unsupported-game" }, 404, headers);
@@ -354,7 +413,7 @@ export default {
       const lobby = env.LOBBY_HUB.get(env.LOBBY_HUB.idFromName("lobby:global"));
       const result = await lobby.fetch(new Request("https://lobby-hub.internal/quick-match", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ gameId, rulesVersion, seriesTarget, matchAnySeries: values.matchAnySeries === true, displayName: values.displayName }),
+        body: JSON.stringify({ gameId, rulesVersion, seriesTarget, matchAnySeries: values.matchAnySeries === true, displayName: account.identity?.username ?? values.displayName, accountId: account.identity?.userId ?? null }),
       }));
       const payload = await result.json() as unknown;
       return json(payload, result.status, headers);
@@ -364,6 +423,8 @@ export default {
       const input = await body(request);
       if (!input || typeof input !== "object" || Array.isArray(input)) return json({ error: "invalid-request" }, 400, headers);
       const values = input as Record<string, unknown>;
+      const account = await resolveAccountIdentity(request, env);
+      if (!account.ok) return json(await account.response.json(), account.response.status, headers);
       const gameId = typeof values.gameId === "string" ? values.gameId : "connect-four";
       const game = workerGames.get(gameId);
       if (!game) return json({ error: "unsupported-game" }, 404, headers);
@@ -378,18 +439,18 @@ export default {
       const seatToken = token();
       const inviteToken = visibility === "invite" ? token() : null;
       const now = Date.now();
-      const displayName = normalizeDisplayName(values.displayName, id, 0);
+      const displayName = account.identity?.username ?? normalizeDisplayName(values.displayName, id, 0);
       const match: Match = {
         id, gameId, rulesVersion, visibility, status: "waiting", createdAt: now,
         retentionDeadline: null,
         expiresAt: now + (visibility === "public" ? ROOM_TTL_MS : INVITE_TTL_MS),
         aiFallbackAt: visibility === "public" ? publicAiFallbackAt(now, now + ROOM_TTL_MS) : null,
         revision: 0, state: null,
-        seats: [{ tokenHash: await hash(seatToken), displayName, connected: false, reconnectRemainingMs: game.getSessionPolicy(rulesVersion).reconnectDurationMs, disconnectedAt: null }, null],
+        seats: [{ tokenHash: await hash(seatToken), accountId: account.identity?.userId ?? null, displayName, connected: false, reconnectRemainingMs: game.getSessionPolicy(rulesVersion).reconnectDurationMs, disconnectedAt: null }, null],
         countdownAt: null, turnDeadline: null, turnStartedAt: null, nextGameDeadline: null,
         reconnectSeat: null, reconnectDeadline: null, pausedTurnMs: null, turnReceiptPending: false, turnReceiptStartedAt: null, outcome: null,
         recentActions: {}, actionTimes: [[], []],
-        seriesTarget, wins: { first: 0, second: 0 }, gameNumber: 0,
+        seriesTarget, wins: { first: 0, second: 0 }, gameNumber: 0, seriesNumber: 1,
         seriesStartingSeat: null, nextStartingSeat: null, nextReady: [false, false],
         rematchReady: [false, false], closedSeats: [false, false], rematchCountdown: false, seriesWinner: null,
         aiRematchesAllowed: 0, aiRematchesUsed: 0,
@@ -418,6 +479,8 @@ export default {
       const input = await body(request);
       if (!input || typeof input !== "object" || Array.isArray(input)) return json({ error: "invalid-request" }, 400, headers);
       const values = input as Record<string, unknown>;
+      const account = await resolveAccountIdentity(request, env);
+      if (!account.ok) return json(await account.response.json(), account.response.status, headers);
       const gameId = typeof values.gameId === "string" ? values.gameId : "";
       const game = workerGames.get(gameId);
       const opponentProvider = opponentProviderForGame(gameId);
@@ -430,7 +493,7 @@ export default {
       const now = Date.now();
       const seedBytes = crypto.getRandomValues(new Uint32Array(1));
       const aiSeed = seedBytes[0] ?? 1;
-      const humanName = normalizeDisplayName(values.displayName, id, 1);
+      const humanName = account.identity?.username ?? normalizeDisplayName(values.displayName, id, 1);
       const requestedAiName = normalizeDisplayName(values.opponentName, id, 0);
       const aiName = displayNameKey(requestedAiName) === displayNameKey(humanName)
         ? uniqueGeneratedDisplayName(id, 1, [humanName])
@@ -441,11 +504,11 @@ export default {
         retentionDeadline: null, expiresAt: now + ROOM_TTL_MS, revision: 0, state: null,
         seats: [
           { tokenHash: null, kind: "ai", aiProfileId: values.profileId, displayName: aiName, connected: true, reconnectRemainingMs: policy.reconnectDurationMs, disconnectedAt: null },
-          { tokenHash: await hash(seatToken), kind: "human", displayName: humanName, connected: false, reconnectRemainingMs: policy.reconnectDurationMs, disconnectedAt: null },
+          { tokenHash: await hash(seatToken), kind: "human", accountId: account.identity?.userId ?? null, displayName: humanName, connected: false, reconnectRemainingMs: policy.reconnectDurationMs, disconnectedAt: null },
         ],
         countdownAt: null, turnDeadline: null, turnStartedAt: null, nextGameDeadline: null,
         reconnectSeat: null, reconnectDeadline: null, pausedTurnMs: null, turnReceiptPending: false, turnReceiptStartedAt: null, outcome: null,
-        recentActions: {}, actionTimes: [[], []], seriesTarget, wins: { first: 0, second: 0 }, gameNumber: 0,
+        recentActions: {}, actionTimes: [[], []], seriesTarget, wins: { first: 0, second: 0 }, gameNumber: 0, seriesNumber: 1,
         seriesStartingSeat: null, nextStartingSeat: null, nextReady: [false, false], rematchReady: [false, false],
         closedSeats: [false, false], rematchCountdown: false, seriesWinner: null,
         aiSeed, aiEngineVersion: opponentProvider.currentEngineVersion,
@@ -482,6 +545,8 @@ export default {
     if (operation === "join" && request.method === "POST") {
       const input = await body(request);
       if (!input || typeof input !== "object" || Array.isArray(input)) return json({ error: "invalid-request" }, 400, headers);
+      const account = await resolveAccountIdentity(request, env);
+      if (!account.ok) return json(await account.response.json(), account.response.status, headers);
       const inviteToken = (input as Record<string, unknown>).inviteToken;
       const values = input as Record<string, unknown>;
       const requestedVersion = values.rulesVersion ?? 1;
@@ -492,7 +557,8 @@ export default {
         body: JSON.stringify({
           inviteHash: typeof inviteToken === "string" ? await hash(inviteToken) : null,
           seatTokenHash: await hash(seatToken),
-          displayName: normalizeDisplayName((input as Record<string, unknown>).displayName, id, 1),
+          displayName: account.identity?.username ?? normalizeDisplayName((input as Record<string, unknown>).displayName, id, 1),
+          accountId: account.identity?.userId ?? null,
           clientSupportedGames: values.supportedGames,
           clientRulesVersion: requestedVersion,
           now: Date.now(),
@@ -570,7 +636,66 @@ export class MatchDurableObject {
     if (shouldPersist) await this.ctx.storage.put("match", normalized);
     return normalized;
   }
-  private async save(match: Match): Promise<void> { await this.ctx.storage.put("match", match); }
+  private async save(match: Match): Promise<void> {
+    await this.ctx.storage.put("match", match);
+    this.queueSeriesHistoryWrite(match);
+  }
+
+  private readonly historyWritesInFlight = new Set<string>();
+
+  private queueSeriesHistoryWrite(match: Match): void {
+    const rows = gameHistoryRows(match);
+    const serviceKey = supabaseServerKey(this.env);
+    const baseUrl = this.env.SUPABASE_URL?.trim();
+    if (!rows.length || !serviceKey || !baseUrl || match.seriesNumber <= (match.persistedSeriesNumber ?? 0)) return;
+    const completionId = rows[0]!.completion_id;
+    if (this.historyWritesInFlight.has(completionId)) return;
+    this.historyWritesInFlight.add(completionId);
+    this.ctx.waitUntil((async () => {
+      try {
+        await this.writeSeriesHistory(baseUrl, serviceKey, rows);
+      } catch {
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        await this.writeSeriesHistory(baseUrl, serviceKey, rows);
+      }
+      await this.markSeriesHistoryPersisted(match.id, match.seriesNumber);
+      // Keep this request's live object aligned with Durable Object storage so
+      // later saves in the same interaction do not upsert the same series again.
+      match.persistedSeriesNumber = Math.max(match.persistedSeriesNumber ?? 0, match.seriesNumber);
+    })().catch(() => {
+        // Match play remains authoritative and unblocked if history storage is unavailable.
+        console.warn("[game-history] Could not persist a completed series.");
+      })
+      .finally(() => this.historyWritesInFlight.delete(completionId)));
+  }
+
+  private async writeSeriesHistory(baseUrl: string, serviceKey: string, rows: readonly GameHistoryRow[]): Promise<void> {
+    const endpoint = new URL("/rest/v1/game_history", baseUrl);
+    endpoint.searchParams.set("on_conflict", "completion_id,user_id");
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        apikey: serviceKey,
+        ...(serviceKey.startsWith("sb_secret_") ? {} : { Authorization: `Bearer ${serviceKey}` }),
+        "Content-Type": "application/json",
+        Prefer: "resolution=merge-duplicates,return=minimal",
+      },
+      body: JSON.stringify(rows),
+      signal: AbortSignal.timeout(5_000),
+    });
+    if (!response.ok) throw new Error("history-write-failed");
+  }
+
+  private async markSeriesHistoryPersisted(matchId: string, seriesNumber: number): Promise<void> {
+    await this.serializeMutation(async () => {
+      const saved = await this.ctx.storage.get<Match>("match");
+      if (!saved || saved.id !== matchId) return;
+      const current = normalizeMatch(saved);
+      if ((current.persistedSeriesNumber ?? 0) >= seriesNumber) return;
+      current.persistedSeriesNumber = seriesNumber;
+      await this.ctx.storage.put("match", current);
+    });
+  }
 
   async fetch(request: Request): Promise<Response> {
     const operation = new URL(request.url).pathname.split("/").at(-1);
@@ -609,7 +734,7 @@ export class MatchDurableObject {
   private async join(request: Request): Promise<Response> {
     const input = await body(request);
     if (!input || typeof input !== "object") return json({ error: "invalid-request" }, 400);
-    const data = input as { inviteHash?: unknown; seatTokenHash?: unknown; displayName?: unknown; clientRulesVersion?: unknown; clientSupportedGames?: unknown; now?: unknown };
+    const data = input as { inviteHash?: unknown; seatTokenHash?: unknown; displayName?: unknown; accountId?: unknown; clientRulesVersion?: unknown; clientSupportedGames?: unknown; now?: unknown };
     if (typeof data.seatTokenHash !== "string" || typeof data.now !== "number") return json({ error: "invalid-request" }, 400);
     const match = await this.load();
     if (!match) return json({ error: "not-found" }, 404);
@@ -622,13 +747,20 @@ export class MatchDurableObject {
       const expected = await this.ctx.storage.get<string>("invite-hash");
       if (typeof data.inviteHash !== "string" || !expected || data.inviteHash !== expected) return json({ error: "invite-invalid" }, 403);
     }
+    const joiningAccountId = typeof data.accountId === "string" && /^[0-9a-f-]{36}$/i.test(data.accountId)
+      ? data.accountId.toLowerCase()
+      : null;
+    const hostAccountId = typeof match.seats[0]?.accountId === "string" ? match.seats[0].accountId.toLowerCase() : null;
+    if (joiningAccountId && joiningAccountId === hostAccountId) return json({ error: "same-account-match" }, 409);
     const displayName = normalizeDisplayName(data.displayName, match.id, 1);
     const hostDisplayName = normalizeDisplayName(match.seats[0]?.displayName, match.id, 0);
     if (displayNameKey(displayName) === displayNameKey(hostDisplayName)) {
       return json({ error: "player-name-taken" }, 409);
     }
     match.seats[1] = {
-      tokenHash: data.seatTokenHash, displayName,
+      tokenHash: data.seatTokenHash,
+      accountId: joiningAccountId,
+      displayName,
       connected: false, reconnectRemainingMs: sessionPolicy(match).reconnectDurationMs, disconnectedAt: null,
     };
     match.aiFallbackAt = null;
@@ -1097,6 +1229,13 @@ export class MatchDurableObject {
     const now = Date.now();
     if (["completed", "cancelled", "expired"].includes(match.status)) {
       if (typeof match.retentionDeadline === "number" && now >= match.retentionDeadline) {
+        const pendingHistory = gameHistoryRows(match);
+        const serviceKey = supabaseServerKey(this.env);
+        const baseUrl = this.env.SUPABASE_URL?.trim();
+        if (pendingHistory.length && serviceKey && baseUrl && match.seriesNumber > (match.persistedSeriesNumber ?? 0)) {
+          try { await this.writeSeriesHistory(baseUrl, serviceKey, pendingHistory); }
+          catch { console.warn("[game-history] Final history retry failed."); }
+        }
         for (const socket of this.ctx.getWebSockets()) socket.close(1000, "Match data expired");
         await this.ctx.storage.deleteAll();
         return;
@@ -1143,6 +1282,8 @@ export class MatchDurableObject {
       if (match.seats.every((seat) => seat?.connected)) {
         const startsRematch = match.rematchCountdown;
         if (startsRematch) {
+          match.seriesNumber += 1;
+          match.seriesCompletedAt = null;
           if (match.seats.some((seat) => seat?.kind === "ai")) {
             match.aiRematchesUsed = Math.min(3, (match.aiRematchesUsed ?? 0) + 1);
           }
@@ -1267,6 +1408,7 @@ export class MatchDurableObject {
     const winner = outcomeWinner(outcome);
     if (winner) match.wins[winner] += 1;
     match.seriesWinner = winner && match.wins[winner] >= match.seriesTarget ? winner : null;
+    match.seriesCompletedAt = match.seriesWinner ? Date.now() : null;
     match.status = match.seriesWinner ? "completed" : "between-games";
     match.retentionDeadline = match.status === "completed" ? Date.now() + TERMINAL_MATCH_RETENTION_MS : null;
     if (match.status === "completed") {
@@ -1287,30 +1429,35 @@ export class MatchDurableObject {
   /** Run the virtual seat synchronously in the same authoritative request/alarm. */
   private applyAiTurn(match: Match, now: number): void {
     if (match.status !== "active" || match.state === null || !Number.isSafeInteger(match.aiEngineVersion)) return;
-    const nextSeat = stateNextPlayer(match);
-    if (!nextSeat) return;
     const aiIndex = match.seats.findIndex((seat) => seat?.kind === "ai");
     const ai = match.seats[aiIndex];
-    if (aiIndex < 0 || !ai?.aiProfileId || (aiIndex === 0 ? "first" : "second") !== nextSeat) return;
+    const aiSeat: PlayerSeat | null = aiIndex === 0 ? "first" : aiIndex === 1 ? "second" : null;
+    if (!aiSeat || !ai?.aiProfileId) return;
     const opponent = opponentProviderForVersion(match.gameId, match.aiEngineVersion!);
     if (!opponent || !opponent.supportsProfile(ai.aiProfileId)) return;
     const game = gameForMatch(match);
     if (!game || !game.inspectState(match.state, match.rulesVersion).ok) return;
-
-    const action = opponent.chooseAction(match.state, nextSeat, ai.aiProfileId, match.aiSeed ?? 1, match.aiEngineVersion!);
-    const applied = game.applyAction(match.state, nextSeat, action, match.rulesVersion);
-    if (!applied.ok) return;
-    const inspected = game.inspectState(applied.value, match.rulesVersion);
-    if (!inspected.ok) return;
-    match.state = applied.value;
-    match.revision += 1;
-    if (inspected.value.outcome) {
-      const result = inspected.value.outcome.kind === "draw" ? "draw" : `win-${inspected.value.outcome.winner}`;
-      this.applyGameOutcome(match, result);
-      return;
+    let inspected = game.inspectState(match.state, match.rulesVersion);
+    // Some games can pass a turn without an action. If that gives the AI
+    // another legal move, process it in this same request: no additional alarm,
+    // network message, or storage round trip is needed.
+    for (let moves = 0; inspected.ok && inspected.value.nextPlayer === aiSeat && moves < 60; moves += 1) {
+      const action = opponent.chooseAction(match.state, aiSeat, ai.aiProfileId, match.aiSeed ?? 1, match.aiEngineVersion!);
+      const applied = game.applyAction(match.state, aiSeat, action, match.rulesVersion);
+      if (!applied.ok) return;
+      inspected = game.inspectState(applied.value, match.rulesVersion);
+      if (!inspected.ok) return;
+      match.state = applied.value;
+      match.revision += 1;
+      if (inspected.value.outcome) {
+        const result = inspected.value.outcome.kind === "draw" ? "draw" : `win-${inspected.value.outcome.winner}`;
+        this.applyGameOutcome(match, result);
+        return;
+      }
     }
 
-    const humanTurn = inspected.value.nextPlayer;
+    const humanTurn = inspected.ok ? inspected.value.nextPlayer : null;
+    if (!humanTurn || humanTurn === aiSeat) return;
     const humanIndex = humanTurn === "first" ? 0 : 1;
     const human = match.seats[humanIndex];
     if (!humanTurn || !human || human.kind === "ai") return;
@@ -1395,6 +1542,7 @@ export class MatchDurableObject {
     match.retentionDeadline = Date.now() + TERMINAL_MATCH_RETENTION_MS;
     match.seriesWinner = otherSeat(seat);
     match.outcome = `series-conceded-${seat}`;
+    match.seriesCompletedAt = Date.now();
     match.turnDeadline = null;
     match.nextReady = [false, false];
     match.nextGameDeadline = null;
@@ -1583,6 +1731,7 @@ export class LobbyHubDurableObject {
             method: "POST", headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               seatTokenHash: await hash(seatToken), displayName: normalizeDisplayName(input.displayName, entry.matchId, 1),
+              accountId: typeof input.accountId === "string" ? input.accountId : null,
               clientSupportedGames: { [gameId]: [rulesVersion] }, clientRulesVersion: rulesVersion, now: Date.now(),
             }),
           }));
@@ -1615,10 +1764,10 @@ export class LobbyHubDurableObject {
         id, gameId, rulesVersion, visibility: "public", status: "waiting", createdAt, expiresAt,
         retentionDeadline: null, aiFallbackAt,
         revision: 0, state: null,
-        seats: [{ tokenHash: await hash(seatToken), displayName, connected: false, reconnectRemainingMs: game.getSessionPolicy(rulesVersion).reconnectDurationMs, disconnectedAt: null }, null],
+        seats: [{ tokenHash: await hash(seatToken), accountId: typeof input.accountId === "string" && /^[0-9a-f-]{36}$/i.test(input.accountId) ? input.accountId : null, displayName, connected: false, reconnectRemainingMs: game.getSessionPolicy(rulesVersion).reconnectDurationMs, disconnectedAt: null }, null],
         countdownAt: null, turnDeadline: null, turnStartedAt: null, nextGameDeadline: null,
         reconnectSeat: null, reconnectDeadline: null, pausedTurnMs: null, turnReceiptPending: false, turnReceiptStartedAt: null, outcome: null,
-        recentActions: {}, actionTimes: [[], []], seriesTarget, wins: { first: 0, second: 0 }, gameNumber: 0,
+        recentActions: {}, actionTimes: [[], []], seriesTarget, wins: { first: 0, second: 0 }, gameNumber: 0, seriesNumber: 1,
         seriesStartingSeat: null, nextStartingSeat: null, nextReady: [false, false], rematchReady: [false, false],
         closedSeats: [false, false], rematchCountdown: false, seriesWinner: null,
       };

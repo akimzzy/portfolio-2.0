@@ -1,6 +1,7 @@
 import type { PlayerSeat, RuntimeTwoPlayerGame } from '../../../../../packages/contracts/dist/index.js';
 import type { GameDialogView, MatchViewSnapshot, OnlineDialogView } from './match-view-store.js';
 import type { LiveMatch, OnlineMultiplayer, PendingOnlineMove } from './match-types.js';
+import { reversiDiscColor } from './games/reversi/presentation.js';
 
 type MatchViewModelInput = Readonly<{
   game: RuntimeTwoPlayerGame;
@@ -44,6 +45,9 @@ export function createMatchViewSnapshot(input: MatchViewModelInput): MatchViewSn
   const outcome = fallback.ok ? fallback.value.outcome : null;
   const nextPlayer = fallback.ok ? fallback.value.nextPlayer : null;
   const startingPlayer = fallback.ok ? fallback.value.startingPlayer : null;
+  const playerColorStarter = isOnline && effectiveGameId === 'reversi' &&
+    (match.status === 'waiting' || match.status === 'countdown')
+    ? null : startingPlayer;
   const actionCount = fallback.ok ? fallback.value.actionCount : 0;
   const revealingWin = outcome?.kind === 'win' && isRevealingWin;
   const current = outcome?.kind === 'win' ? outcome.winner : nextPlayer;
@@ -101,9 +105,12 @@ export function createMatchViewSnapshot(input: MatchViewModelInput): MatchViewSn
 
   const players = (['first', 'second'] as const).map((seat) => {
     const name = playerName(seat);
+    const reversiColor = playerColorStarter ? reversiDiscColor(seat, playerColorStarter) : null;
     const seatLabel = isOnline
       ? match.connectedSeats?.[seat === 'first' ? 0 : 1]
-        ? startingPlayer ? (seat === startingPlayer ? 'Goes first' : 'Goes second') : seat === 'first' ? 'Player 1' : 'Player 2'
+        ? effectiveGameId === 'reversi'
+          ? reversiColor ? `${reversiColor === 'dark' ? 'Dark' : 'Light'} · ${seat === playerColorStarter ? 'Goes first' : 'Goes second'}` : seat === 'first' ? 'Player 1' : 'Player 2'
+          : startingPlayer ? (seat === startingPlayer ? 'Goes first' : 'Goes second') : seat === 'first' ? 'Player 1' : 'Player 2'
         : seat === activeSession?.seat ? 'Reconnecting…' : match.status === 'waiting' && seat === 'second' ? 'Waiting for player' : 'Offline'
       : seat === startingPlayer ? 'Goes first' : 'Goes second';
     const pendingWin = revealingWin && pendingWinSeat === seat ? 1 : 0;

@@ -13,7 +13,7 @@ import type { ActiveMatch, DeviceMatchLock } from '../services/match/match-sessi
 import type { MatchApiBody } from '../services/match/match-api-client.js';
 import { parseLiveMatch } from '../features/match/match-types.js';
 import type { LiveMatch, OnlineMultiplayer, PendingOnlineMove } from '../features/match/match-types.js';
-import { reconcilePendingMove } from '../features/match/pending-move-reconciliation.js';
+import { canRetryPendingMove, reconcilePendingMove } from '../features/match/pending-move-reconciliation.js';
 import { canLeaveSeriesResult } from '../features/match/series-actions.js';
 import { randomDisplayName } from '../shared/guest-names.js';
 import { createMatchViewSnapshot } from '../features/match/match-view-model.js';
@@ -21,6 +21,7 @@ import type { GameController } from './controller-contract.js';
 import { clientGames, GAME_CATALOG, supportedGameVersions } from '../games/registry.js';
 import { isRegisteredOpponentProfile } from '../games/opponents.js';
 import { aiMoveDelay } from '../features/match/ai-presentation.js';
+import { accountSession } from '../features/account/account-session.js';
 
 type Theme = 'system' | 'light' | 'dark';
 type GameDialogMode = GameDialogView['mode'];
@@ -46,6 +47,7 @@ const onlineDialog = {
   get open() { return onlineDialogView !== null; },
   close() {
     onlineDialogView = null;
+    appStore.update({ onlineSetupOpen: false });
     updateMatchViewSnapshot();
   },
 };
@@ -88,7 +90,7 @@ let currentInviteLink = '';
 let matchOpenAttempt = 0;
 const configuredApi = document.querySelector<HTMLMetaElement>('meta[name="games-api"]')?.content.replace(/\/$/, '') ?? '/api';
 const gamesApi = configuredApi.startsWith('/') ? `${window.location.origin}${configuredApi}` : configuredApi;
-const matchApi = new MatchApiClient(gamesApi);
+const matchApi = new MatchApiClient(gamesApi, async () => (await accountSession.getIdentityForRequest())?.accessToken ?? null);
 const matchSessionStorage = new MatchSessionStorage();
 const matchCoordinator = new MatchSessionCoordinator(matchApi, matchSessionStorage);
 let onlineTransport: MatchTransport | null = null;
@@ -282,6 +284,8 @@ function playerName(seat: PlayerSeat | null) {
 }
 
 function chosenDisplayName() {
+  const username = accountSession.getIdentity()?.username;
+  if (username) return username;
   const cleaned = enteredDisplayName();
   return cleaned || randomDisplayName();
 }
@@ -748,6 +752,36 @@ function clearPendingOnlineMove(publish = true) {
   if (publish) updateMatchViewSnapshot();
 }
 
+function sendPendingOnlineMove(match: LiveMatch, pending: PendingOnlineMove): boolean {
+  return onlineTransport?.send({
+    protocolVersion: 1,
+    type: 'submit-action',
+    gameId: match.gameId,
+    rulesVersion: match.rulesVersion,
+    matchId: match.matchId,
+    actionId: pending.actionId,
+    expectedRevision: pending.expectedRevision,
+    action: pending.action,
+  }) ?? false;
+}
+
+function schedulePendingMoveReconciliation(actionId: string) {
+  if (pendingMoveTimer !== null) window.clearTimeout(pendingMoveTimer);
+  pendingMoveTimer = window.setTimeout(() => {
+    pendingMoveTimer = null;
+    if (pendingOnlineMove?.actionId !== actionId) return;
+    pendingMoveSyncRequested = true;
+    if (multiplayer?.connected) {
+      pendingMoveSyncRequested = false;
+      onlineTransport?.resume();
+    }
+    pendingMoveTimer = window.setTimeout(() => {
+      pendingMoveTimer = null;
+      if (pendingOnlineMove?.actionId === actionId) void reconcilePendingOnlineMove(actionId);
+    }, 4_000);
+  }, 4_000);
+}
+
 function updateFromServer(input: unknown, delivery: { syncId?: string; acceptedActionId?: string } = {}) {
   const match = parseLiveMatch(input);
   if (!multiplayer?.online || !match || match.matchId !== multiplayer.roomId) return;
@@ -760,7 +794,7 @@ function updateFromServer(input: unknown, delivery: { syncId?: string; acceptedA
   const pendingResolution = reconcilePendingMove(pendingOnlineMove, match, delivery);
   const pendingResolved = pendingResolution === 'accepted';
   const pendingUnconfirmed = pendingResolution === 'not-applied';
-  if (pendingResolved || pendingUnconfirmed) clearPendingOnlineMove(false);
+  if (pendingResolved) clearPendingOnlineMove(false);
   const previousMatch = multiplayer.match;
   if (previousMatch?.matchId !== match.matchId || previousMatch?.gameNumber !== match.gameNumber) clearAiPresentation();
   else if (match.status !== 'active' && aiPresentation?.matchId === match.matchId) clearAiPresentation();
@@ -796,6 +830,21 @@ function updateFromServer(input: unknown, delivery: { syncId?: string; acceptedA
     }
   }
 
+  if (pendingOnlineMove && !pendingResolved && multiplayer.connected) {
+    const inspected = match.state === null ? null : matchedGame.inspectState(match.state, match.rulesVersion);
+    const nextPlayer = inspected?.ok ? inspected.value.nextPlayer : null;
+    if (canRetryPendingMove(pendingOnlineMove, match, nextPlayer)) {
+      const retry = { ...pendingOnlineMove, expectedRevision: match.revision, retryCount: 1 };
+      if (sendPendingOnlineMove(match, retry)) {
+        pendingOnlineMove = retry;
+        schedulePendingMoveReconciliation(retry.actionId);
+      }
+    } else if (pendingUnconfirmed && match.awaitingTurnReceipt?.seat !== multiplayer.seat) {
+      clearPendingOnlineMove(false);
+      announce('Move not confirmed. Choose a column to try again.');
+    }
+  }
+
   if (match.status === 'active' && match.gameNumber !== previousGameNumber && previousGameNumber > 0) {
     if (resultDialogTimer !== null) window.clearTimeout(resultDialogTimer);
     resultDialogTimer = null;
@@ -809,10 +858,8 @@ function updateFromServer(input: unknown, delivery: { syncId?: string; acceptedA
   }
   let delayedAiAction = false;
   if (gameActionCount() > previousMoves) {
-    const starter = gameStartingPlayer();
     const actionDelta = gameActionCount() - previousMoves;
-    const lastMoveIndex = previousMoves + actionDelta - 1;
-    const playedSeat = starter ? lastMoveIndex % 2 === 0 ? starter : starter === 'first' ? 'second' : 'first' : 'first';
+    const playedSeat = inspectCurrentState()?.lastActionPlayer ?? 'first';
     const outcome = gameOutcome();
     const aiSeatIndex = match.seatKinds?.findIndex((kind) => kind === 'ai') ?? -1;
     const aiSeat = aiSeatIndex === 0 ? 'first' : aiSeatIndex === 1 ? 'second' : null;
@@ -842,10 +889,9 @@ function updateFromServer(input: unknown, delivery: { syncId?: string; acceptedA
   } else {
     renderStatus();
   }
-  if (pendingUnconfirmed) announce('Move not confirmed. Choose a column to try again.');
-
   const changedOutcome = match.outcome !== previousMatch?.outcome;
   const changedStatus = match.status !== previousStatus;
+  if (match.status === 'completed' && (changedStatus || changedOutcome)) accountSession.markGameHistoryStale();
   const delayingAiPresentation = delayedAiAction || Boolean(aiPresentation?.matchId === match.matchId &&
     aiPresentation.actionCount === gameActionCount() && aiPresentation.thinking);
   const timedOut = match.outcome?.startsWith('timeout-') || match.outcome?.startsWith('reconnect-timeout-');
@@ -1074,7 +1120,11 @@ function renderJoinMatchRules(match: MatchApiBody | null) {
   if (!match) return { title: `Join ${game?.title ?? 'game'}`, showRules: false, rulesSeries: '', rulesDetails: '' };
   const timeoutRule = match.turnTimeoutForfeitsGame === false ? 'Timeouts end a turn' : 'Timeout loses this game';
   const tieRule = match.tiesAwardNoPoint === false ? 'Ties add a point' : 'Ties add no points';
-  return { title: `Join ${game?.title ?? 'game'}`, showRules: true, rulesSeries: series, rulesDetails: `${turnSeconds} sec per turn · ${timeoutRule} · ${tieRule}` };
+  const gameRules = game?.id === 'reversi'
+    ? 'Place a disc to trap and flip opposing discs. Most discs wins. If you have no legal move, you pass.'
+    : game?.description;
+  const matchRules = `${turnSeconds} sec per turn · ${timeoutRule} · ${tieRule}`;
+  return { title: `Join ${game?.title ?? 'game'}`, showRules: true, rulesSeries: series, rulesDetails: gameRules ? `${gameRules} · ${matchRules}` : matchRules };
 }
 
 async function showJoinGamePrompt(match: MatchApiBody | null = null) {
@@ -1180,6 +1230,10 @@ async function joinOnlineMatch(displayName: string | null = null, isCurrentAttem
     }
     if (errorCode === 'player-name-taken') {
       updateOnlineDialog({ mode: 'join', title: 'Join game', description: '', nameInvalid: true, busy: false, error: 'That name is already in this match. Choose another, or leave it blank for a random name.' });
+      return;
+    }
+    if (errorCode === 'same-account-match') {
+      presentOnlineDialog({ mode: 'message', title: 'Choose another match', description: 'You can’t join a match created by the same account.', closeLabel: 'Close' });
       return;
     }
     const title = errorCode === 'room-full' ? 'This game is full'
@@ -1528,6 +1582,7 @@ function presentOnlineDialog(view: OnlineDialogOptions) {
     inviteLink: '', copyLabel: 'Copy link', busy: false, closeLabel: 'Close',
   };
   onlineDialogView = Object.assign(defaults, view);
+  appStore.update({ onlineSetupOpen: true });
   updateMatchViewSnapshot();
 }
 
@@ -1971,36 +2026,15 @@ function playGameAction(action: unknown) {
     if (pendingOnlineMove || !multiplayer.connected || multiplayer.match?.status !== 'active' || seat !== multiplayer.seat) return;
     const actionId = crypto.randomUUID();
     const expectedRevision = multiplayer.revision;
-    pendingOnlineMove = { actionId, action: parsedAction.value, previousStateKey: JSON.stringify(state) ?? '', seat: multiplayer.seat, expectedRevision };
+    pendingOnlineMove = { actionId, action: parsedAction.value, previousStateKey: JSON.stringify(state) ?? '', seat: multiplayer.seat, expectedRevision, retryCount: 0 };
     updateMatchViewSnapshot();
-    const sent = onlineTransport?.send({
-      protocolVersion: 1,
-      type: 'submit-action',
-      gameId: currentGameId,
-      rulesVersion: version,
-      matchId: multiplayer.roomId,
-      actionId,
-      expectedRevision,
-      action: parsedAction.value,
-    });
+    const sent = multiplayer.match ? sendPendingOnlineMove(multiplayer.match, pendingOnlineMove) : false;
     if (!sent) {
       clearPendingOnlineMove();
       announce('Move not sent. Check your connection and try again.');
       return;
     }
-    pendingMoveTimer = window.setTimeout(() => {
-      pendingMoveTimer = null;
-      if (pendingOnlineMove?.actionId !== actionId) return;
-      pendingMoveSyncRequested = true;
-      if (multiplayer?.connected) {
-        pendingMoveSyncRequested = false;
-        onlineTransport?.resume();
-      }
-      pendingMoveTimer = window.setTimeout(() => {
-        pendingMoveTimer = null;
-        if (pendingOnlineMove?.actionId === actionId) void reconcilePendingOnlineMove(actionId);
-      }, 4_000);
-    }, 4_000);
+    schedulePendingMoveReconciliation(actionId);
     return;
   }
 

@@ -1,8 +1,9 @@
 import { createGameRegistry } from '@portfolio-games/contracts';
 import { connectFourRuntime } from '@portfolio-games/connect-four';
+import { reversiRuntime } from '@portfolio-games/reversi';
 
 /** Browser-safe game rules registry; React renderers are registered separately. */
-export const clientGames = createGameRegistry([connectFourRuntime]);
+export const clientGames = createGameRegistry([connectFourRuntime, reversiRuntime]);
 
 export const GAME_CATALOG = Object.freeze(clientGames.entries.map(({ gameId, title, description, playerCount }) => Object.freeze({
   id: gameId,

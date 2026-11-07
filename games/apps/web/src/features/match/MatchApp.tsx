@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useSyncExternalStore, type FormEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type FormEvent } from 'react';
 import { getMatchViewSnapshot, subscribeMatchView } from './match-view-store';
 import type { GameController } from '../../app/controller-contract';
 import type { GameAppSnapshot } from '../../app/game-app-store';
@@ -12,8 +12,34 @@ import { clearQuickMessageHistory, readQuickMessageHistory, rememberQuickMessage
 import { Countdown } from '../../components/Countdown';
 import { showDialogWithoutActionFocus } from '../../shared/show-dialog';
 import { gameViews } from './game-views';
+import { GameHowToPlay } from './GameHowToPlay';
+import { reversiDiscColor } from './games/reversi/presentation.js';
+import { accountSession } from '../account/account-session';
 
-function getPlayerStatusLabel(match: ReturnType<typeof getMatchViewSnapshot>, player: (typeof match.players)[number]) {
+type ReversiMovePresentation = {
+  key: string;
+  matchId: string | null;
+  actionCount: number;
+  seat: 'first' | 'second';
+  row: number;
+  column: number;
+  flipCount: number;
+  inRapidSequence: boolean;
+  skippedSeat: 'first' | 'second' | null;
+};
+
+const MOVE_CUE_DURATION_MS = 2600;
+
+function getPlayerStatusLabel(
+  match: ReturnType<typeof getMatchViewSnapshot>,
+  player: (typeof match.players)[number],
+  presentation: ReversiMovePresentation | null = null,
+) {
+  if (presentation?.skippedSeat) {
+    if (player.seat === presentation.skippedSeat) return 'No legal move';
+    if (player.seat === presentation.seat) return 'Plays again';
+  }
+  if (presentation) return player.seat === presentation.seat ? 'Move played' : 'Waiting';
   if (match.aiThinking) return player.seat === match.aiSeat ? player.isSelf ? 'Your turn' : 'Their turn' : 'Waiting';
   if (match.turnReceipt?.seat === player.seat) return 'Syncing turn';
   const isTurnStatus = match.statusText === 'Your turn'
@@ -34,7 +60,12 @@ function getPlayerStatusLabel(match: ReturnType<typeof getMatchViewSnapshot>, pl
 
 export default function MatchApp({ controller, connection }: { controller: GameController; connection: GameAppSnapshot['connection'] }) {
   const match = useSyncExternalStore(subscribeMatchView, getMatchViewSnapshot, getMatchViewSnapshot);
+  const account = useSyncExternalStore(accountSession.subscribe, accountSession.getSnapshot, accountSession.getSnapshot);
   const [detailsOpen, setDetailsOpen] = useState(false);
+  const [detailsTab, setDetailsTab] = useState<'match' | 'rules'>('match');
+  const [onlineGuideKeyOpen, setOnlineGuideKeyOpen] = useState<string | null>(null);
+  const [movePresentation, setMovePresentation] = useState<ReversiMovePresentation | null>(null);
+  const [moveCue, setMoveCue] = useState<ReversiMovePresentation | null>(null);
   const [reviewedResultDialog, setReviewedResultDialog] = useState<NonNullable<ReturnType<typeof getMatchViewSnapshot>['dialog']> | null>(null);
   const [chatOpen, setChatOpen] = useState(false);
   const [chatText, setChatText] = useState('');
@@ -45,17 +76,64 @@ export default function MatchApp({ controller, connection }: { controller: GameC
   const [messageHistory, setMessageHistory] = useState(readQuickMessageHistory);
   const messageRequestSequence = useRef(0);
   const closingResultForBoardReview = useRef(false);
+  const resultDialogKeyRef = useRef<string | null>(null);
   const dialogRef = useRef<HTMLDialogElement>(null);
   const chatDialogRef = useRef<HTMLDialogElement>(null);
   const resultDialogRef = useRef<HTMLDialogElement>(null);
   const boardReviewToggleRef = useRef<HTMLButtonElement>(null);
   const onlineDialogRef = useRef<HTMLDialogElement>(null);
+  const moveCueClearTimer = useRef<number | null>(null);
   const GameBoard = gameViews[match.gameId];
+  const reversiStarter = match.gameId === 'reversi' && match.status !== 'waiting' && match.status !== 'countdown' && typeof match.gameState === 'object' && match.gameState !== null &&
+    'startingPlayer' in match.gameState && (match.gameState.startingPlayer === 'first' || match.gameState.startingPlayer === 'second')
+    ? match.gameState.startingPlayer : null;
   const optionsExpanded = match.onlineDialog?.optionsExpanded ?? false;
+  const onlineDialogMode = match.onlineDialog?.mode ?? null;
+  const onlineDialogKey = match.onlineDialog ? `${match.gameId}:${onlineDialogMode}` : null;
+  const onlineGuideOpen = onlineDialogKey !== null && onlineGuideKeyOpen === onlineDialogKey;
   const chatLength = Array.from(chatText.normalize('NFC').replace(/\s+/gu, ' ').trim()).length;
   const canReviewResultBoard = Boolean(match.dialog && ['local-result', 'online-between', 'online-complete'].includes(match.dialog.mode));
   const resultBoardReview = Boolean(reviewedResultDialog && reviewedResultDialog === match.dialog && canReviewResultBoard);
   const boardReviewDialog = resultBoardReview ? match.dialog : null;
+  const onMovePresentationChange = useCallback((presentation: ReversiMovePresentation | null) => {
+    setMovePresentation(presentation);
+    if (moveCueClearTimer.current !== null) window.clearTimeout(moveCueClearTimer.current);
+    if (presentation) {
+      setMoveCue(presentation.flipCount > 1 || presentation.inRapidSequence ? presentation : null);
+    } else {
+      moveCueClearTimer.current = window.setTimeout(() => {
+        moveCueClearTimer.current = null;
+        setMoveCue(null);
+      }, MOVE_CUE_DURATION_MS);
+    }
+  }, []);
+  const isMovePresentationActive = Boolean(
+    match.gameId === 'reversi' && movePresentation &&
+    movePresentation.matchId === match.matchId &&
+    movePresentation.actionCount <= match.actionCount + (match.pendingAction ? 1 : 0),
+  );
+  const presentationSeat = isMovePresentationActive ? movePresentation?.seat ?? null : null;
+  const activeMovePresentation = isMovePresentationActive ? movePresentation : null;
+  const selfSeat = match.players.find((player) => player.isSelf)?.seat;
+  const movePresentationHint = match.gameId === 'reversi' && moveCue?.matchId === match.matchId
+    ? `${moveCue.seat === selfSeat ? 'You' : 'Opponent'} played ${String.fromCharCode(65 + moveCue.column)}${moveCue.row + 1} · flipped ${moveCue.flipCount} ${moveCue.flipCount === 1 ? 'disc' : 'discs'}.`
+    : null;
+  const routineReversiHint = match.gameId === 'reversi' && ['Your move.', 'Waiting for your opponent.'].includes(match.boardHint);
+  const boardStatusHint = routineReversiHint
+    ? movePresentationHint ?? ''
+    : match.boardHint || movePresentationHint || '';
+  useEffect(() => {
+    if (moveCue?.matchId === match.matchId) return;
+    if (moveCueClearTimer.current !== null) window.clearTimeout(moveCueClearTimer.current);
+    moveCueClearTimer.current = null;
+    setMoveCue(null);
+    return () => {
+      if (moveCueClearTimer.current !== null) window.clearTimeout(moveCueClearTimer.current);
+    };
+  }, [match.matchId, moveCue?.matchId]);
+  useEffect(() => () => {
+    if (moveCueClearTimer.current !== null) window.clearTimeout(moveCueClearTimer.current);
+  }, []);
   useEffect(() => {
     const dialog = dialogRef.current;
     if (!dialog) return;
@@ -186,9 +264,15 @@ export default function MatchApp({ controller, connection }: { controller: GameC
       }
       return;
     }
+    const resultDialogKey = match.dialog ? `${match.dialog.mode}:${match.dialog.title}` : null;
     if (match.dialog && !dialog.open) {
       showDialogWithoutActionFocus(dialog);
+    } else if (match.dialog && dialog.open && resultDialogKeyRef.current !== resultDialogKey) {
+      // Result dialogs can transition in place (for example, a forfeit
+      // confirmation becoming the round result). Keep focus off the new action.
+      dialog.focus({ preventScroll: true });
     } else if (!match.dialog && dialog.open) dialog.close(match.dialogReturnValue);
+    resultDialogKeyRef.current = resultDialogKey;
   }, [match.dialog, match.dialogReturnValue, boardReviewDialog]);
 
   useEffect(() => {
@@ -208,7 +292,7 @@ export default function MatchApp({ controller, connection }: { controller: GameC
         {connection.reconnect && <Countdown deadline={connection.reconnect.deadline} clockOffset={connection.reconnect.clockOffset} context={connection.reconnect.context} urgent={connection.reconnect.urgent === true} onExpire={controller.refreshMatchStatus} />}
       </div>}
       <div className="connection-actions">
-        <button className="round-move-count" id="round-move-count" type="button" aria-label={`Match details: ${match.roundLabel}`} aria-haspopup="dialog" aria-controls="match-details-dialog" onClick={() => setDetailsOpen(true)}>
+        <button className="round-move-count" id="round-move-count" type="button" aria-label={`Match details: ${match.roundLabel}`} aria-haspopup="dialog" aria-controls="match-details-dialog" onClick={() => { setDetailsTab('match'); setDetailsOpen(true); }}>
           <span id="round-move-label">Match details</span><svg aria-hidden="true" viewBox="0 0 12 12"><path d="m3 4.5 3 3 3-3" /></svg>
         </button>
         {connection.shareVisible && <button className="share-game-link-button" type="button" aria-label="Share game link" title="Share game link" onClick={controller.shareGameLink}><svg aria-hidden="true" viewBox="0 0 20 20"><path d="M10 13V3m0 0L6.5 6.5M10 3l3.5 3.5M4 10v6h12v-6" /></svg><span>Share</span></button>}
@@ -218,19 +302,22 @@ export default function MatchApp({ controller, connection }: { controller: GameC
         {connection.retryVisible && <button className="retry-connection-button" type="button" onClick={controller.retryConnection}>Retry connection</button>}
       </div>
     </div>
-    <section className="player-list" id="player-list" aria-label="Match score">
-      {match.players.map((player) => <div className={`player-row${player.active ? ' is-active' : ''}${player.winner ? ' is-winner' : ''}`} data-player={player.seat} key={player.seat}>
-        <span className={`player-token token-${player.seat}`} aria-hidden="true">{player.seat === 'first' ? '1' : '2'}</span>
+    <section className="player-list" id="player-list" data-game={match.gameId} aria-label="Match score">
+      {match.players.map((player) => {
+        const playerIsActive = isMovePresentationActive ? player.seat === presentationSeat : player.active;
+        return <div className={`player-row${playerIsActive ? ' is-active' : ''}${player.winner ? ' is-winner' : ''}`} data-player={player.seat} key={player.seat}>
+        <span className={`player-token token-${player.seat}${reversiStarter ? ` disc-${reversiDiscColor(player.seat, reversiStarter)}` : ''}`} aria-hidden="true">{player.seat === 'first' ? '1' : '2'}</span>
         <span className="player-copy">
           <span className="player-name-line"><span className="player-name">{player.name}</span>{player.opponentNote && <span className="player-opponent-note">{player.opponentNote}</span>}</span>
-          <span className="player-status-line" aria-live="polite">{getPlayerStatusLabel(match, player)}{player.active && match.turnCountdown && <Countdown deadline={match.turnCountdown.deadline} clockOffset={match.turnCountdown.clockOffset} context="left in this turn" urgent {...(match.aiThinking ? {} : { onExpire: controller.refreshMatchStatus })} />}{player.active && match.turnReceipt?.seat === player.seat && <Countdown deadline={match.turnReceipt.deadline} clockOffset={match.turnReceipt.clockOffset} context="to receive the move" />}</span>
+          <span className="player-status-line" aria-live="polite">{getPlayerStatusLabel(match, player, activeMovePresentation)}{!isMovePresentationActive && player.active && match.turnCountdown && <Countdown deadline={match.turnCountdown.deadline} clockOffset={match.turnCountdown.clockOffset} context="left in this turn" urgent {...(match.aiThinking ? {} : { onExpire: controller.refreshMatchStatus })} />}{!isMovePresentationActive && player.active && match.turnReceipt?.seat === player.seat && <Countdown deadline={match.turnReceipt.deadline} clockOffset={match.turnReceipt.clockOffset} context="to receive the move" />}</span>
         </span>
         <span className="player-row-trailing">
           <span className="player-score" id={`score-${player.seat}`}>{player.score}</span>
         </span>
-      </div>)}
+      </div>;
+      })}
     </section>
-    {!boardReviewDialog && (connection.visible || match.reactionsVisible) && <div className="match-activity-row" aria-live="polite" aria-atomic="true">
+    {(connection.visible || match.reactionsVisible) && <div className="match-activity-row" aria-live="polite" aria-atomic="true">
       {(['first', 'second'] as const).map((seat) => {
         const notice = match.activityNotice?.seat === seat ? match.activityNotice : null;
         const reaction = notice?.kind === 'reaction' ? MATCH_REACTIONS.find((item) => item.id === notice.reactionId) : null;
@@ -261,18 +348,20 @@ export default function MatchApp({ controller, connection }: { controller: GameC
           </button>
         </div> : <div className="board-info-row">
           <div className="board-info-copy">
-            <div className="board-status-hint" id="board-hint" aria-live="polite">{match.boardHint}</div>
+          <div className={`board-status-hint${movePresentationHint && boardStatusHint === movePresentationHint ? ' is-move-cue' : ''}`} id="board-hint" aria-live="polite">{boardStatusHint}</div>
             {match.startCountdown && <Countdown deadline={match.startCountdown.deadline} clockOffset={match.startCountdown.clockOffset} context="until the game starts" onExpire={controller.refreshMatchStatus} />}
           </div>
         </div>}
-        {boardReviewDialog && <div className="board-review-action-slot">
+        {(boardReviewDialog || match.gameId === 'reversi') && <div className="board-review-action-slot" aria-hidden={!boardReviewDialog}>
+          {boardReviewDialog && <>
           <div className="dialog-actions board-review-actions" role="group" aria-label="Choose what to do next">
             {boardReviewDialog.secondaryLabel && <button className="dialog-secondary" type="button" disabled={boardReviewDialog.secondaryDisabled} onClick={controller.gameDialogSecondary}>{boardReviewDialog.secondaryLabel}</button>}
             <button className={`dialog-primary${boardReviewDialog.primaryDanger ? ' dialog-danger' : ''}`} type="button" disabled={boardReviewDialog.primaryDisabled} onClick={controller.gameDialogPrimary}>{boardReviewDialog.primaryLabel}</button>
           </div>
+          </>}
         </div>}
-        {GameBoard ? <GameBoard match={match} controller={controller} /> : <div className="board-wrap" role="status">This game is not available in this build.</div>}
-        {match.reactionsVisible && <div className="social-dock" role="group" aria-label="Quick reactions and chat">
+        {GameBoard ? <GameBoard match={match} controller={controller} {...(match.gameId === 'reversi' ? { onMovePresentationChange } : {})} /> : <div className="board-wrap" role="status">This game is not available in this build.</div>}
+        {(connection.visible || match.matchId !== null || match.reactionsVisible) && <div className={`social-dock${match.reactionsVisible ? '' : ' is-unavailable'}`} role="group" aria-label="Quick reactions and chat" aria-hidden={!match.reactionsVisible}>
           <div className="quick-reactions">
             {[MATCH_REACTIONS[0], MATCH_REACTIONS[1], MATCH_REACTIONS[3], MATCH_REACTIONS[4], MATCH_REACTIONS[5]].map((reaction) => <button className="quick-reaction" key={reaction.id} type="button" disabled={!match.canReact} aria-label={`React: ${reaction.label}`} title={reaction.label} onClick={() => controller.sendReaction(reaction.id)}>{reaction.symbol}</button>)}
           </div>
@@ -280,7 +369,7 @@ export default function MatchApp({ controller, connection }: { controller: GameC
             <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3.5 4.5h13v9h-7l-4 3v-3h-2z" /></svg><span>Chat</span>{match.hasUnreadActivity && <i className="chat-unread-dot" aria-hidden="true" />}
           </button>
         </div>}
-        {match.socialFeedback && <p className="social-feedback" role="status" key={match.socialFeedback.id}>{match.socialFeedback.message}</p>}
+        {(connection.visible || match.matchId !== null || match.socialFeedback) && <p className="social-feedback" role={match.socialFeedback ? 'status' : undefined} aria-live={match.socialFeedback ? 'polite' : undefined} aria-hidden={!match.socialFeedback}>{match.socialFeedback?.message ?? ''}</p>}
       </div>
     </section>
 
@@ -317,15 +406,24 @@ export default function MatchApp({ controller, connection }: { controller: GameC
           <h2 id="match-details-title">Match details</h2>
           <button className="dialog-close" type="button" aria-label="Close match details" onClick={() => setDetailsOpen(false)}><svg aria-hidden="true" viewBox="0 0 20 20"><path d="m5 5 10 10M15 5 5 15" /></svg></button>
         </div>
-        <dl className="match-details-list">
-          <div><dt>Series</dt><dd>{match.detail.format}</dd></div>
-          <div><dt>Current game</dt><dd>{match.detail.game}</dd></div>
-          <div><dt>Room</dt><dd>{match.detail.room}</dd></div>
-          <div className="match-details-score-row"><dt>Games won</dt><dd><ul className="match-details-players"><li><span>{match.detail.firstName}</span><strong>{match.detail.firstScore}</strong></li><li><span>{match.detail.secondName}</span><strong>{match.detail.secondScore}</strong></li></ul></dd></div>
-          <div><dt>Now</dt><dd>{match.detail.status}</dd></div>
-        </dl>
-        <p className="match-details-note">Tied games add no wins and can extend the series.</p>
-        {match.hasAiOpponent && <p className="match-details-note">Your opponent is computer-controlled.</p>}
+        <div className="game-guide-tabs" role="group" aria-label="Match information">
+          <button id="match-info-tab" type="button" aria-pressed={detailsTab === 'match'} aria-controls="match-info-panel" onClick={() => setDetailsTab('match')}>Match</button>
+          <button id="match-rules-tab" type="button" aria-pressed={detailsTab === 'rules'} aria-controls="match-rules-panel" onClick={() => setDetailsTab('rules')}>How to play</button>
+        </div>
+        <div id="match-info-panel" hidden={detailsTab !== 'match'}>
+          <dl className="match-details-list">
+            <div><dt>Series</dt><dd>{match.detail.format}</dd></div>
+            <div><dt>Current game</dt><dd>{match.detail.game}</dd></div>
+            <div><dt>Room</dt><dd>{match.detail.room}</dd></div>
+            <div className="match-details-score-row"><dt>Games won</dt><dd><ul className="match-details-players"><li><span>{match.detail.firstName}</span><strong>{match.detail.firstScore}</strong></li><li><span>{match.detail.secondName}</span><strong>{match.detail.secondScore}</strong></li></ul></dd></div>
+            <div><dt>Now</dt><dd>{match.detail.status}</dd></div>
+          </dl>
+          <p className="match-details-note">Tied games add no wins and can extend the series.</p>
+          {match.hasAiOpponent && <p className="match-details-note">Your opponent is computer-controlled.</p>}
+        </div>
+        <div id="match-rules-panel" hidden={detailsTab !== 'rules'}>
+          <GameHowToPlay gameId={match.gameId} />
+        </div>
       </div>
     </dialog>
 
@@ -383,7 +481,7 @@ export default function MatchApp({ controller, connection }: { controller: GameC
       </div>}
     </dialog>
 
-    <dialog className="game-dialog online-dialog" id="online-dialog" ref={onlineDialogRef} aria-labelledby="online-title" onCancel={(event) => { event.preventDefault(); controller.closeOnlineDialog(); }} onClose={controller.onlineDialogClosed}>
+    <dialog className="game-dialog online-dialog" id="online-dialog" ref={onlineDialogRef} aria-labelledby="online-title" onCancel={(event) => { event.preventDefault(); controller.closeOnlineDialog(); }} onClose={() => { setOnlineGuideKeyOpen(null); controller.onlineDialogClosed(); }}>
       {match.onlineDialog && <div className="dialog-content">
         <div className="online-dialog-header">
           <h2 id="online-title">{match.onlineDialog.title}</h2>
@@ -396,11 +494,20 @@ export default function MatchApp({ controller, connection }: { controller: GameC
         {(match.onlineDialog.mode === 'join' || match.onlineDialog.mode === 'opponent') && match.onlineDialog.showRules && <div className="join-match-rules" role="group" aria-label="Match rules">
           <strong>{match.onlineDialog.rulesSeries}</strong><span>{match.onlineDialog.rulesDetails}</span>
         </div>}
-        {(match.onlineDialog.mode === 'create' || match.onlineDialog.mode === 'join' || match.onlineDialog.mode === 'opponent') && <div className="player-name-field">
-          <label htmlFor="player-name-input">Your name <span>Optional</span></label>
-          <input id="player-name-input" type="text" maxLength={24} autoComplete="nickname" autoCapitalize="words" aria-describedby={match.onlineDialog.nameInvalid ? 'player-name-hint online-error' : 'player-name-hint'} aria-invalid={match.onlineDialog.nameInvalid || undefined} value={match.onlineDialog.name} onChange={(event) => controller.updateOnlineForm('name', event.currentTarget.value)} placeholder="e.g. Swift Fox 42" />
-          <small id="player-name-hint">Leave blank for a random name. Names must differ in a match.</small>
+        {(match.onlineDialog.mode === 'create' || match.onlineDialog.mode === 'join' || match.onlineDialog.mode === 'opponent') && <div className="online-game-guide">
+          <button className="game-guide-disclosure" type="button" aria-expanded={onlineGuideOpen} onClick={() => setOnlineGuideKeyOpen(onlineGuideOpen ? null : onlineDialogKey)}>
+            {onlineGuideOpen ? 'Hide how to play' : 'How to play'}
+            <svg aria-hidden="true" viewBox="0 0 12 12"><path d={onlineGuideOpen ? 'm3 7.5 3-3 3 3' : 'm3 4.5 3 3 3-3'} /></svg>
+          </button>
+          {onlineGuideOpen && <GameHowToPlay gameId={match.gameId} />}
         </div>}
+        {(match.onlineDialog.mode === 'create' || match.onlineDialog.mode === 'join' || match.onlineDialog.mode === 'opponent') && (account.status === 'signed-in' && account.username
+          ? <div className="player-name-field account-match-name"><span className="account-match-label">Playing as</span><strong>@{account.username}</strong><small>Your account username is used in this match.</small></div>
+          : <div className="player-name-field">
+            <label htmlFor="player-name-input">Your name <span>Optional</span></label>
+            <input id="player-name-input" type="text" maxLength={24} autoComplete="nickname" autoCapitalize="words" aria-describedby={match.onlineDialog.nameInvalid ? 'player-name-hint online-error' : 'player-name-hint'} aria-invalid={match.onlineDialog.nameInvalid || undefined} value={match.onlineDialog.name} onChange={(event) => controller.updateOnlineForm('name', event.currentTarget.value)} placeholder="e.g. Swift Fox 42" />
+            <small id="player-name-hint">Leave blank for a random name. Names must differ in a match.</small>
+          </div>)}
         {match.onlineDialog.mode === 'create' && <div className="match-create-form">
           <fieldset className="visibility-options create-visibility-options">
             <legend>Who can join?</legend>
