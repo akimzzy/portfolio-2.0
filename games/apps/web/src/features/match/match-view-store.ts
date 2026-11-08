@@ -1,11 +1,11 @@
-import type { MatchReactionId } from '../../../../../packages/contracts/dist/index.js';
-import type { PlayerSeat } from '../../../../../packages/contracts/dist/index.js';
-import type { LiveMatch } from './match-types.js';
-export type { PlayerSeat } from '../../../../../packages/contracts/dist/index.js';
+import type { MatchReactionId } from "../../../../../packages/contracts/dist/index.js";
+import type { PlayerSeat } from "../../../../../packages/contracts/dist/index.js";
+import type { LiveMatch } from "./match-types.js";
+export type { PlayerSeat } from "../../../../../packages/contracts/dist/index.js";
 export type GameDialogView = {
   mode: string;
   mark: string;
-  markTone: 'first' | 'second' | 'draw';
+  markTone: "first" | "second" | "draw";
   title: string;
   description: string;
   primaryLabel: string;
@@ -15,22 +15,29 @@ export type GameDialogView = {
   secondaryDisabled: boolean;
   canDismiss: boolean;
   hasSeriesResult: boolean;
-  series: { score: string; firstName: string; firstNeeded: string; secondName: string; secondNeeded: string } | null;
+  series: {
+    score: string;
+    firstName: string;
+    firstNeeded: string;
+    secondName: string;
+    secondNeeded: string;
+  } | null;
   countdown: { label: string; deadline: number | null; clockOffset: number } | null;
 };
 export type OnlineDialogView = {
-  mode: 'create' | 'join' | 'opponent' | 'retry' | 'invite' | 'message';
+  mode: "create" | "join" | "opponent" | "retry" | "invite" | "message";
   title: string;
   description: string;
   error: string;
   name: string;
+  joinAsGuest: boolean;
   nameInvalid: boolean;
   showRules: boolean;
   rulesSeries: string;
   rulesDetails: string;
   seriesTarget: 1 | 2 | 3;
   matchAnySeries: boolean;
-  visibility: 'public' | 'invite';
+  visibility: "public" | "invite";
   optionsExpanded: boolean;
   inviteLink: string;
   copyLabel: string;
@@ -39,7 +46,7 @@ export type OnlineDialogView = {
 };
 export type MatchViewSnapshot = {
   matchId: string | null;
-  status: LiveMatch['status'] | null;
+  status: LiveMatch["status"] | null;
   hasAiOpponent: boolean;
   aiSeat: PlayerSeat | null;
   aiThinking: boolean;
@@ -51,16 +58,18 @@ export type MatchViewSnapshot = {
   gameState: unknown;
   actionCount: number;
   nextPlayer: PlayerSeat | null;
-  outcome: { kind: 'win'; winner: PlayerSeat } | { kind: 'draw' } | null;
+  outcome: { kind: "win"; winner: PlayerSeat } | { kind: "draw" } | null;
   statusText: string;
   boardHint: string;
   canPlay: boolean;
   pendingAction: { action: unknown; seat: PlayerSeat } | null;
   reactionsVisible: boolean;
   canReact: boolean;
-  socialFeedback: { id: number; kind: 'error'; message: string } | null;
-  activityNotice: { eventId: string; seat: PlayerSeat; kind: 'reaction'; reactionId: MatchReactionId } |
-    { eventId: string; seat: PlayerSeat; kind: 'message'; message: string } | null;
+  socialFeedback: { id: number; kind: "error"; message: string } | null;
+  activityNotice:
+    | { eventId: string; seat: PlayerSeat; kind: "reaction"; reactionId: MatchReactionId }
+    | { eventId: string; seat: PlayerSeat; kind: "message"; message: string }
+    | null;
   hasUnreadActivity: boolean;
   roundLabel: string;
   players: readonly {
@@ -93,19 +102,67 @@ export type MatchViewSnapshot = {
 
 const EMPTY_SNAPSHOT: MatchViewSnapshot = {
   matchId: null,
-  status: null, hasAiOpponent: false, aiSeat: null, aiThinking: false, aiReveal: false, aiRevealStarted: false, aiThinkDelayMs: 0,
-  gameId: 'connect-four', rulesVersion: 2, gameState: null, actionCount: 0,
-  nextPlayer: 'first', outcome: null,
-  statusText: 'Player 1 to move', boardHint: 'Choose a column.', canPlay: true,
+  status: null,
+  hasAiOpponent: false,
+  aiSeat: null,
+  aiThinking: false,
+  aiReveal: false,
+  aiRevealStarted: false,
+  aiThinkDelayMs: 0,
+  gameId: "connect-four",
+  rulesVersion: 2,
+  gameState: null,
+  actionCount: 0,
+  nextPlayer: "first",
+  outcome: null,
+  statusText: "Player 1 to move",
+  boardHint: "Choose a column.",
+  canPlay: true,
   pendingAction: null,
-  reactionsVisible: false, canReact: false, socialFeedback: null, activityNotice: null, hasUnreadActivity: false,
-  roundLabel: 'Game 1 · 0 moves',
+  reactionsVisible: false,
+  canReact: false,
+  socialFeedback: null,
+  activityNotice: null,
+  hasUnreadActivity: false,
+  roundLabel: "Game 1 · 0 moves",
   players: [
-    { seat: 'first', name: 'Player 1', opponentNote: null, isSelf: false, seatLabel: 'Goes first', score: 0, active: true, winner: false },
-    { seat: 'second', name: 'Player 2', opponentNote: null, isSelf: false, seatLabel: 'Goes second', score: 0, active: false, winner: false },
+    {
+      seat: "first",
+      name: "Player 1",
+      opponentNote: null,
+      isSelf: false,
+      seatLabel: "Goes first",
+      score: 0,
+      active: true,
+      winner: false,
+    },
+    {
+      seat: "second",
+      name: "Player 2",
+      opponentNote: null,
+      isSelf: false,
+      seatLabel: "Goes second",
+      score: 0,
+      active: false,
+      winner: false,
+    },
   ],
-  detail: { format: 'Local practice', game: 'Game 1', room: 'Local', firstName: 'Player 1', secondName: 'Player 2', firstScore: 0, secondScore: 0, status: 'Player 1 to move' },
-  turnCountdown: null, turnReceipt: null, startCountdown: null, dialog: null, dialogReturnValue: '', onlineDialog: null,
+  detail: {
+    format: "Local practice",
+    game: "Game 1",
+    room: "Local",
+    firstName: "Player 1",
+    secondName: "Player 2",
+    firstScore: 0,
+    secondScore: 0,
+    status: "Player 1 to move",
+  },
+  turnCountdown: null,
+  turnReceipt: null,
+  startCountdown: null,
+  dialog: null,
+  dialogReturnValue: "",
+  onlineDialog: null,
 };
 
 let snapshot = EMPTY_SNAPSHOT;

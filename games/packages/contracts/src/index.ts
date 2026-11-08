@@ -12,15 +12,35 @@ export const MATCH_REACTIONS = Object.freeze([
   Object.freeze({ id: "think", symbol: "🤔", label: "Thinking" }),
   Object.freeze({ id: "celebrate", symbol: "🎉", label: "Celebrate" }),
 ] as const);
-export type MatchReactionId = typeof MATCH_REACTIONS[number]["id"];
+export type MatchReactionId = (typeof MATCH_REACTIONS)[number]["id"];
 export const MAX_QUICK_MESSAGE_CHARS = 100;
 export const QUICK_MESSAGE_HISTORY_LIMIT = 6;
+
+/** Stable, non-authenticated in-house identities. Keep the Supabase seed in sync. */
+export type InHousePlayerIdentity = Readonly<{
+  playerId: string;
+  username: string;
+  displayName: string;
+}>;
+export const IN_HOUSE_PLAYERS: readonly InHousePlayerIdentity[] = Object.freeze([
+  Object.freeze({ playerId: "house_ayo", username: "house_ayo", displayName: "Ayo" }),
+  Object.freeze({ playerId: "house_tomi", username: "house_tomi18", displayName: "18 Tomi" }),
+  Object.freeze({ playerId: "house_zara", username: "house_zara", displayName: "Zara" }),
+  Object.freeze({ playerId: "house_kola", username: "house_kola42", displayName: "42 Kola" }),
+  Object.freeze({ playerId: "house_maya", username: "house_maya", displayName: "Maya" }),
+  Object.freeze({ playerId: "house_nia", username: "house_nia7", displayName: "7 Nia" }),
+  Object.freeze({ playerId: "house_deji", username: "house_deji", displayName: "Deji" }),
+  Object.freeze({ playerId: "house_tobi", username: "house_tobi63", displayName: "63 Tobi" }),
+  Object.freeze({ playerId: "house_chichi", username: "house_chichi", displayName: "Chichi" }),
+  Object.freeze({ playerId: "house_kemi", username: "house_kemi29", displayName: "29 Kemi" }),
+]);
 
 /** Normalize untrusted, single-line in-match text for both client and service. */
 export function normalizeQuickMessage(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const message = value
     .normalize("NFC")
+    // eslint-disable-next-line no-control-regex -- Prevent control characters in player-visible text.
     .replace(/[\u0000-\u001f\u007f-\u009f]/gu, " ")
     .replace(/\s+/gu, " ")
     .trim();
@@ -32,20 +52,17 @@ export function isMatchReactionId(value: unknown): value is MatchReactionId {
   return typeof value === "string" && MATCH_REACTIONS.some((reaction) => reaction.id === value);
 }
 export type GameOutcome =
-  | Readonly<{ kind: "win"; winner: PlayerSeat }>
-  | Readonly<{ kind: "draw" }>;
+  Readonly<{ kind: "win"; winner: PlayerSeat }> | Readonly<{ kind: "draw" }>;
 
 export type ValidationIssue = Readonly<{ path: string; message: string }>;
 export type ValidationResult<T> =
-  | Readonly<{ ok: true; value: T }>
-  | Readonly<{ ok: false; issues: readonly ValidationIssue[] }>;
+  Readonly<{ ok: true; value: T }> | Readonly<{ ok: false; issues: readonly ValidationIssue[] }>;
 export type Parser<T> = (input: unknown) => ValidationResult<T>;
 
 export type GameIdentity = Readonly<{ gameId: string; rulesVersion: number }>;
 export type GameSessionPolicy = Readonly<{ turnDurationMs: number; reconnectDurationMs: number }>;
 export type GameActionResult<TState, TCode extends string> =
-  | Readonly<{ ok: true; value: TState }>
-  | Readonly<{ ok: false; error: Readonly<{ code: TCode }> }>;
+  Readonly<{ ok: true; value: TState }> | Readonly<{ ok: false; error: Readonly<{ code: TCode }> }>;
 
 /** Small contract for turn-based two-player games. */
 export type TwoPlayerGameModule<
@@ -64,13 +81,20 @@ export type TwoPlayerGameModule<
   createState: (startingPlayer: PlayerSeat, rulesVersion: TRulesVersion) => TState;
   parseAction: (input: unknown, rulesVersion: TRulesVersion) => ValidationResult<TAction>;
   parseState: (input: unknown, rulesVersion: TRulesVersion) => ValidationResult<TState>;
-  applyAction: (state: TState, player: PlayerSeat, action: TAction, rulesVersion: TRulesVersion) => GameActionResult<TState, TCode>;
+  applyAction: (
+    state: TState,
+    player: PlayerSeat,
+    action: TAction,
+    rulesVersion: TRulesVersion,
+  ) => GameActionResult<TState, TCode>;
   getOutcome: (state: TState) => GameOutcome | null;
   getNextPlayer: (state: TState) => PlayerSeat | null;
   getStartingPlayer: (state: TState) => PlayerSeat;
   getActionCount: (state: TState) => number;
   /** Seat that made the latest action; null before the first action. */
   getLastActionPlayer?: (state: TState) => PlayerSeat | null;
+  /** Compact, immutable state needed to render a completed game's board. */
+  getHistorySnapshot: (state: TState) => unknown;
 }>;
 
 /** A type-erased game module used only after data crosses a runtime boundary. */
@@ -86,7 +110,13 @@ export type RuntimeTwoPlayerGame = Readonly<{
   createState(startingPlayer: PlayerSeat, rulesVersion: number): unknown;
   parseAction(input: unknown, rulesVersion: number): ValidationResult<unknown>;
   inspectState(input: unknown, rulesVersion: number): ValidationResult<RuntimeGameStateInfo>;
-  applyAction(state: unknown, player: PlayerSeat, action: unknown, rulesVersion: number): GameActionResult<unknown, string>;
+  getHistorySnapshot(input: unknown, rulesVersion: number): ValidationResult<unknown>;
+  applyAction(
+    state: unknown,
+    player: PlayerSeat,
+    action: unknown,
+    rulesVersion: number,
+  ): GameActionResult<unknown, string>;
 }>;
 
 export type RuntimeGameStateInfo = Readonly<{
@@ -125,38 +155,64 @@ export function adaptTwoPlayerGame<
     rulesVersion: module.rulesVersion,
     supportedRulesVersions: Object.freeze([...module.supportedRulesVersions]),
     getSessionPolicy(rulesVersion: number): GameSessionPolicy {
-      if (!supportsRulesVersion(rulesVersion)) throw new RangeError("Unsupported game rules version.");
+      if (!supportsRulesVersion(rulesVersion))
+        throw new RangeError("Unsupported game rules version.");
       const policy = module.getSessionPolicy(rulesVersion);
-      if (!Number.isSafeInteger(policy.turnDurationMs) || policy.turnDurationMs < 1 ||
-        !Number.isSafeInteger(policy.reconnectDurationMs) || policy.reconnectDurationMs < 0) {
-        throw new RangeError(`Invalid session policy for ${module.gameId} rules version ${rulesVersion}.`);
+      if (
+        !Number.isSafeInteger(policy.turnDurationMs) ||
+        policy.turnDurationMs < 1 ||
+        !Number.isSafeInteger(policy.reconnectDurationMs) ||
+        policy.reconnectDurationMs < 0
+      ) {
+        throw new RangeError(
+          `Invalid session policy for ${module.gameId} rules version ${rulesVersion}.`,
+        );
       }
       return Object.freeze({ ...policy });
     },
     supportsRulesVersion,
     createState(startingPlayer: PlayerSeat, rulesVersion: number): unknown {
-      if (!supportsRulesVersion(rulesVersion)) throw new RangeError("Unsupported game rules version.");
+      if (!supportsRulesVersion(rulesVersion))
+        throw new RangeError("Unsupported game rules version.");
       return module.createState(startingPlayer, rulesVersion);
     },
     parseAction,
     inspectState(input: unknown, rulesVersion: number): ValidationResult<RuntimeGameStateInfo> {
       const parsed = parseState(input, rulesVersion);
       if (!parsed.ok) return parsed;
-      return { ok: true, value: Object.freeze({
-        state: parsed.value,
-        outcome: module.getOutcome(parsed.value),
-        nextPlayer: module.getNextPlayer(parsed.value),
-        startingPlayer: module.getStartingPlayer(parsed.value),
-        actionCount: module.getActionCount(parsed.value),
-        lastActionPlayer: module.getLastActionPlayer?.(parsed.value) ?? null,
-      }) };
+      return {
+        ok: true,
+        value: Object.freeze({
+          state: parsed.value,
+          outcome: module.getOutcome(parsed.value),
+          nextPlayer: module.getNextPlayer(parsed.value),
+          startingPlayer: module.getStartingPlayer(parsed.value),
+          actionCount: module.getActionCount(parsed.value),
+          lastActionPlayer: module.getLastActionPlayer?.(parsed.value) ?? null,
+        }),
+      };
     },
-    applyAction(state: unknown, player: PlayerSeat, action: unknown, rulesVersion: number): GameActionResult<unknown, string> {
+    getHistorySnapshot(input: unknown, rulesVersion: number): ValidationResult<unknown> {
+      const parsed = parseState(input, rulesVersion);
+      if (!parsed.ok) return parsed;
+      return { ok: true, value: module.getHistorySnapshot(parsed.value) };
+    },
+    applyAction(
+      state: unknown,
+      player: PlayerSeat,
+      action: unknown,
+      rulesVersion: number,
+    ): GameActionResult<unknown, string> {
       const parsedState = parseState(state, rulesVersion);
       if (!parsedState.ok) return { ok: false, error: { code: "invalid-state" } };
       const parsedAction = parseAction(action, rulesVersion);
       if (!parsedAction.ok) return { ok: false, error: { code: "invalid-action" } };
-      const result = module.applyAction(parsedState.value, player, parsedAction.value, rulesVersion as TRulesVersion);
+      const result = module.applyAction(
+        parsedState.value,
+        player,
+        parsedAction.value,
+        rulesVersion as TRulesVersion,
+      );
       return result.ok ? { ok: true, value: result.value } : result;
     },
   });
@@ -166,12 +222,21 @@ export function adaptTwoPlayerGame<
 export function createGameRegistry(games: readonly RuntimeTwoPlayerGame[]) {
   const byId = new Map<string, RuntimeTwoPlayerGame>();
   for (const game of games) {
-    if (!/^[a-z][a-z0-9-]{0,63}$/.test(game.gameId)) throw new TypeError(`Invalid game id: ${game.gameId}`);
+    if (!/^[a-z][a-z0-9-]{0,63}$/.test(game.gameId))
+      throw new TypeError(`Invalid game id: ${game.gameId}`);
     if (byId.has(game.gameId)) throw new TypeError(`Duplicate game id: ${game.gameId}`);
-    if (!game.title.trim() || !game.description.trim() || !game.playerCount.trim()) throw new TypeError(`Missing game catalog metadata: ${game.gameId}`);
-    if (game.supportedRulesVersions.length === 0 || game.supportedRulesVersions.some((version) => !Number.isSafeInteger(version) || version < 1) ||
-      new Set(game.supportedRulesVersions).size !== game.supportedRulesVersions.length) throw new TypeError(`Invalid supported rules versions for ${game.gameId}.`);
-    if (!game.supportsRulesVersion(game.rulesVersion)) throw new TypeError(`Current rules version is not registered for ${game.gameId}.`);
+    if (!game.title.trim() || !game.description.trim() || !game.playerCount.trim())
+      throw new TypeError(`Missing game catalog metadata: ${game.gameId}`);
+    if (
+      game.supportedRulesVersions.length === 0 ||
+      game.supportedRulesVersions.some(
+        (version) => !Number.isSafeInteger(version) || version < 1,
+      ) ||
+      new Set(game.supportedRulesVersions).size !== game.supportedRulesVersions.length
+    )
+      throw new TypeError(`Invalid supported rules versions for ${game.gameId}.`);
+    if (!game.supportsRulesVersion(game.rulesVersion))
+      throw new TypeError(`Current rules version is not registered for ${game.gameId}.`);
     for (const version of game.supportedRulesVersions) game.getSessionPolicy(version);
     byId.set(game.gameId, game);
   }
@@ -180,39 +245,48 @@ export function createGameRegistry(games: readonly RuntimeTwoPlayerGame[]) {
     entries,
     get(gameId: string, rulesVersion?: number): RuntimeTwoPlayerGame | null {
       const game = byId.get(gameId);
-      if (!game || (rulesVersion !== undefined && !game.supportsRulesVersion(rulesVersion))) return null;
+      if (!game || (rulesVersion !== undefined && !game.supportsRulesVersion(rulesVersion)))
+        return null;
       return game;
     },
   });
 }
-type Envelope = GameIdentity & Readonly<{
-  protocolVersion: typeof PROTOCOL_VERSION;
-  matchId: string;
-}>;
+type Envelope = GameIdentity &
+  Readonly<{
+    protocolVersion: typeof PROTOCOL_VERSION;
+    matchId: string;
+  }>;
 
 /** Identity/seat is established by the service session, not supplied here. */
-export type ActionCommand<TAction> = Envelope & Readonly<{
-  type: "submit-action";
-  actionId: string;
-  expectedRevision: number;
-  action: TAction;
-}>;
+export type ActionCommand<TAction> = Envelope &
+  Readonly<{
+    type: "submit-action";
+    actionId: string;
+    expectedRevision: number;
+    action: TAction;
+  }>;
 
-export type StateMessage<TState> = Envelope & Readonly<{
-  type: "match-state";
-  revision: number;
-  state: TState;
-}>;
+export type StateMessage<TState> = Envelope &
+  Readonly<{
+    type: "match-state";
+    revision: number;
+    state: TState;
+  }>;
 
 export const ACTION_ERROR_CODES = [
-  "invalid-action", "wrong-turn", "match-finished", "stale-revision", "forbidden",
+  "invalid-action",
+  "wrong-turn",
+  "match-finished",
+  "stale-revision",
+  "forbidden",
 ] as const;
-export type ActionErrorCode = typeof ACTION_ERROR_CODES[number];
-export type ActionRejection = Envelope & Readonly<{
-  type: "action-rejected";
-  actionId: string;
-  code: ActionErrorCode;
-}>;
+export type ActionErrorCode = (typeof ACTION_ERROR_CODES)[number];
+export type ActionRejection = Envelope &
+  Readonly<{
+    type: "action-rejected";
+    actionId: string;
+    code: ActionErrorCode;
+  }>;
 
 export function invalid(path: string, message: string): ValidationResult<never> {
   return { ok: false, issues: [{ path, message }] };
@@ -238,7 +312,11 @@ export function parseGameOutcome(input: unknown): ValidationResult<GameOutcome> 
   if (isExactObject(input, ["kind"]) && input.kind === "draw") {
     return { ok: true, value: Object.freeze({ kind: "draw" }) };
   }
-  if (isExactObject(input, ["kind", "winner"]) && input.kind === "win" && isPlayerSeat(input.winner)) {
+  if (
+    isExactObject(input, ["kind", "winner"]) &&
+    input.kind === "win" &&
+    isPlayerSeat(input.winner)
+  ) {
     return { ok: true, value: Object.freeze({ kind: "win", winner: input.winner }) };
   }
   return invalid("outcome", "Expected a win with a valid winner, or a draw.");
@@ -253,61 +331,103 @@ function revision(input: unknown): input is number {
 }
 
 function envelope(input: Record<string, unknown>, type: string): ValidationResult<Envelope> {
-  if (input.protocolVersion !== PROTOCOL_VERSION) return invalid("protocolVersion", "Unsupported protocol version.");
+  if (input.protocolVersion !== PROTOCOL_VERSION)
+    return invalid("protocolVersion", "Unsupported protocol version.");
   if (input.type !== type) return invalid("type", `Expected ${type}.`);
   if (!identifier(input.matchId)) return invalid("matchId", "Expected a bounded match identifier.");
   if (typeof input.gameId !== "string" || !/^[a-z][a-z0-9-]{0,63}$/.test(input.gameId)) {
     return invalid("gameId", "Expected a bounded game identifier.");
   }
-  if (!revision(input.rulesVersion) || input.rulesVersion < 1) return invalid("rulesVersion", "Expected a positive rules version.");
-  return { ok: true, value: {
-    protocolVersion: PROTOCOL_VERSION, matchId: input.matchId,
-    gameId: input.gameId, rulesVersion: input.rulesVersion,
-  } };
+  if (!revision(input.rulesVersion) || input.rulesVersion < 1)
+    return invalid("rulesVersion", "Expected a positive rules version.");
+  return {
+    ok: true,
+    value: {
+      protocolVersion: PROTOCOL_VERSION,
+      matchId: input.matchId,
+      gameId: input.gameId,
+      rulesVersion: input.rulesVersion,
+    },
+  };
 }
 
 function nested<T>(result: ValidationResult<T>, prefix: string): ValidationResult<T> {
   if (result.ok) return result;
-  return { ok: false, issues: result.issues.map((issue) => ({
-    path: issue.path ? `${prefix}.${issue.path}` : prefix, message: issue.message,
-  })) };
+  return {
+    ok: false,
+    issues: result.issues.map((issue) => ({
+      path: issue.path ? `${prefix}.${issue.path}` : prefix,
+      message: issue.message,
+    })),
+  };
 }
 
 const COMMON_KEYS = ["protocolVersion", "type", "matchId", "gameId", "rulesVersion"] as const;
 
-export function parseActionCommand<T>(input: unknown, parseAction: Parser<T>): ValidationResult<ActionCommand<T>> {
-  if (!isExactObject(input, [...COMMON_KEYS, "actionId", "expectedRevision", "action"])) return invalid("", "Invalid action envelope fields.");
+export function parseActionCommand<T>(
+  input: unknown,
+  parseAction: Parser<T>,
+): ValidationResult<ActionCommand<T>> {
+  if (!isExactObject(input, [...COMMON_KEYS, "actionId", "expectedRevision", "action"]))
+    return invalid("", "Invalid action envelope fields.");
   const base = envelope(input, "submit-action");
   if (!base.ok) return base;
-  if (!identifier(input.actionId)) return invalid("actionId", "Expected a bounded action identifier.");
-  if (!revision(input.expectedRevision)) return invalid("expectedRevision", "Expected a nonnegative safe integer.");
+  if (!identifier(input.actionId))
+    return invalid("actionId", "Expected a bounded action identifier.");
+  if (!revision(input.expectedRevision))
+    return invalid("expectedRevision", "Expected a nonnegative safe integer.");
   const action = nested(parseAction(input.action), "action");
   if (!action.ok) return action;
-  return { ok: true, value: Object.freeze({ ...base.value, type: "submit-action",
-    actionId: input.actionId, expectedRevision: input.expectedRevision, action: action.value,
-  }) };
+  return {
+    ok: true,
+    value: Object.freeze({
+      ...base.value,
+      type: "submit-action",
+      actionId: input.actionId,
+      expectedRevision: input.expectedRevision,
+      action: action.value,
+    }),
+  };
 }
 
-export function parseStateMessage<T>(input: unknown, parseState: Parser<T>): ValidationResult<StateMessage<T>> {
-  if (!isExactObject(input, [...COMMON_KEYS, "revision", "state"])) return invalid("", "Invalid state envelope fields.");
+export function parseStateMessage<T>(
+  input: unknown,
+  parseState: Parser<T>,
+): ValidationResult<StateMessage<T>> {
+  if (!isExactObject(input, [...COMMON_KEYS, "revision", "state"]))
+    return invalid("", "Invalid state envelope fields.");
   const base = envelope(input, "match-state");
   if (!base.ok) return base;
   if (!revision(input.revision)) return invalid("revision", "Expected a nonnegative safe integer.");
   const state = nested(parseState(input.state), "state");
   if (!state.ok) return state;
-  return { ok: true, value: Object.freeze({ ...base.value, type: "match-state",
-    revision: input.revision, state: state.value,
-  }) };
+  return {
+    ok: true,
+    value: Object.freeze({
+      ...base.value,
+      type: "match-state",
+      revision: input.revision,
+      state: state.value,
+    }),
+  };
 }
 
 export function parseActionRejection(input: unknown): ValidationResult<ActionRejection> {
-  if (!isExactObject(input, [...COMMON_KEYS, "actionId", "code"])) return invalid("", "Invalid rejection envelope fields.");
+  if (!isExactObject(input, [...COMMON_KEYS, "actionId", "code"]))
+    return invalid("", "Invalid rejection envelope fields.");
   const base = envelope(input, "action-rejected");
   if (!base.ok) return base;
-  if (!identifier(input.actionId)) return invalid("actionId", "Expected a bounded action identifier.");
+  if (!identifier(input.actionId))
+    return invalid("actionId", "Expected a bounded action identifier.");
   const code = ACTION_ERROR_CODES.find((candidate) => candidate === input.code);
   if (!code) return invalid("code", "Unknown action error code.");
-  return { ok: true, value: Object.freeze({ ...base.value, type: "action-rejected",
-    actionId: input.actionId, code,
-  }) };
+  return {
+    ok: true,
+    value: Object.freeze({
+      ...base.value,
+      type: "action-rejected",
+      actionId: input.actionId,
+      code,
+    }),
+  };
 }

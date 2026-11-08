@@ -1,13 +1,13 @@
 import {
   normalizeQuickMessage,
   QUICK_MESSAGE_HISTORY_LIMIT,
-} from '../../../../../packages/contracts/dist/index.js';
+} from "../../../../../packages/contracts/dist/index.js";
 
-const STORAGE_KEY = 'games-quick-message-history';
+const STORAGE_KEY = "games-quick-message-history";
 
 export function readQuickMessageHistory(): string[] {
   try {
-    const parsed: unknown = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '[]');
+    const parsed: unknown = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "[]");
     if (!Array.isArray(parsed)) return [];
     return parsed
       .map(normalizeQuickMessage)
@@ -22,8 +22,10 @@ export function rememberQuickMessage(value: string): string[] {
   const message = normalizeQuickMessage(value);
   if (!message) return readQuickMessageHistory();
 
-  const next = [message, ...readQuickMessageHistory().filter((saved) => saved.toLowerCase() !== message.toLowerCase())]
-    .slice(0, QUICK_MESSAGE_HISTORY_LIMIT);
+  const next = [
+    message,
+    ...readQuickMessageHistory().filter((saved) => saved.toLowerCase() !== message.toLowerCase()),
+  ].slice(0, QUICK_MESSAGE_HISTORY_LIMIT);
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
   } catch {

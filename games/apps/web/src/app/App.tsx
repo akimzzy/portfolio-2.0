@@ -15,6 +15,11 @@ export default function App() {
     controller.store.getSnapshot,
     controller.store.getSnapshot,
   );
+  const account = useSyncExternalStore(
+    accountSession.subscribe,
+    accountSession.getSnapshot,
+    accountSession.getSnapshot,
+  );
 
   useEffect(() => {
     accountSession.start();
@@ -27,38 +32,73 @@ export default function App() {
   }, [controller]);
 
   useEffect(() => {
+    if (account.status !== "signed-in") return;
+    const returnToMatch = accountSession.takeOAuthMatchReturn();
+    if (returnToMatch) window.location.replace(returnToMatch);
+  }, [account.status]);
+
+  useEffect(() => {
     document.documentElement.dataset.theme = app.theme;
-    document.documentElement.style.colorScheme =
-      app.theme === "system" ? "light dark" : app.theme;
+    document.documentElement.style.colorScheme = app.theme === "system" ? "light dark" : app.theme;
   }, [app.theme]);
 
   const matchScreen = app.screen === "match";
   const openingScreen = app.screen === "opening";
   const gameScreen = matchScreen || openingScreen;
+  const leaderboardPage = app.screen === "lobby" && app.lobbyTab === "leaderboard";
+  const showHeaderBack = gameScreen || leaderboardPage;
+  const headerBackLabel = leaderboardPage ? "Back to lobby" : "Back to games";
   return (
     <div className="game-app-root">
-      <a className="skip-link" href={matchScreen ? "#board" : openingScreen ? "#match-opening" : "#lobby-view"}>
+      <a
+        className="skip-link"
+        href={matchScreen ? "#board" : openingScreen ? "#match-opening" : "#lobby-view"}
+      >
         {gameScreen ? "Skip to game" : "Skip to games"}
       </a>
       <header className="site-header">
         <div className="header-inner">
           <div className="game-title">
-            <h1>{app.title}</h1>
-            {gameScreen ? app.description && <p aria-live="polite">{app.description}</p> : <LobbySummary />}
+            <div className={showHeaderBack ? "header-title-row" : undefined}>
+              {showHeaderBack && (
+                <button
+                  className="header-back-button"
+                  type="button"
+                  onClick={leaderboardPage ? controller.closeLeaderboard : controller.goToGames}
+                  aria-label={headerBackLabel}
+                  title={headerBackLabel}
+                >
+                  <svg aria-hidden="true" viewBox="0 0 20 20">
+                    <path d="M15.5 10H4.5m0 0 4.2-4.2M4.5 10l4.2 4.2" />
+                  </svg>
+                </button>
+              )}
+              <div className="header-title-copy">
+                <h1 className={leaderboardPage ? "leaderboard-page-title" : undefined}>
+                  {leaderboardPage ? "Leaderboard" : app.title}
+                </h1>
+                {gameScreen
+                  ? app.description && <p aria-live="polite">{app.description}</p>
+                  : !leaderboardPage && <LobbySummary />}
+              </div>
+              {leaderboardPage && (
+                <div id="leaderboard-game-picker-slot" className="leaderboard-header-slot" />
+              )}
+            </div>
           </div>
           <div className="header-actions">
-            {app.controls.homeVisible && !app.onlineSetupOpen && (
+            {app.screen === "lobby" && app.lobbyTab !== "leaderboard" && (
               <button
-                className="games-home-button"
+                className="leaderboard-nav-button"
                 type="button"
-                onClick={controller.goToGames}
-                aria-label="All games"
-                title="All games"
+                onClick={controller.openLeaderboard}
+                aria-label="Leaderboard"
+                title="Leaderboard"
               >
                 <svg aria-hidden="true" viewBox="0 0 20 20">
-                  <path d="M15.5 10H4.5m0 0 4.2-4.2M4.5 10l4.2 4.2" />
+                  <path d="M6 3.5h8v3.2a4 4 0 0 1-8 0V3.5Zm0 1H3.5v1.8a3.3 3.3 0 0 0 3.8 3.2m6.7-5h2.5v1.8a3.3 3.3 0 0 1-3.8 3.2M10 10.8v3.4m-3 2.3h6m-5-2.3h4" />
                 </svg>
-                <span>Games</span>
+                <span>Leaderboard</span>
               </button>
             )}
             {app.controls.playOnlineVisible && !app.onlineSetupOpen && (
@@ -96,37 +136,17 @@ export default function App() {
                 aria-label={app.soundEnabled ? "Mute sound" : "Enable sound"}
                 onClick={controller.toggleSound}
               >
-                <svg
-                  className="sound-on-icon"
-                  aria-hidden="true"
-                  viewBox="0 0 20 20"
-                >
+                <svg className="sound-on-icon" aria-hidden="true" viewBox="0 0 20 20">
                   <path d="M3 8v4h3l4 3V5L6 8H3Z" />
                   <path d="M13 7a5 5 0 0 1 0 6M15 4.5a8 8 0 0 1 0 11" />
                 </svg>
-                <svg
-                  className="sound-off-icon"
-                  aria-hidden="true"
-                  viewBox="0 0 20 20"
-                >
+                <svg className="sound-off-icon" aria-hidden="true" viewBox="0 0 20 20">
                   <path d="M3 8v4h3l4 3V5L6 8H3Z" />
                   <path d="m13 8 4 4m0-4-4 4" />
                 </svg>
               </button>
             )}
-            <button
-              className="theme-button"
-              type="button"
-              aria-label={`Change theme. Current theme: ${app.theme}`}
-              title={`Theme: ${app.theme}`}
-              onClick={controller.toggleTheme}
-            >
-              <svg aria-hidden="true" viewBox="0 0 20 20">
-                <circle cx="10" cy="10" r="6" />
-                <path d="M10 4a6 6 0 0 1 0 12Z" />
-              </svg>
-            </button>
-            {app.screen === "lobby" && <AccountControl />}
+            <AccountControl theme={app.theme} onToggleTheme={controller.toggleTheme} />
           </div>
         </div>
       </header>
@@ -136,7 +156,11 @@ export default function App() {
             <MatchApp controller={controller} connection={app.connection} />
           </div>
         ) : openingScreen && app.openingMatch ? (
-          <MatchOpening opening={app.openingMatch} onRetry={controller.retryOpenMatch} onBack={controller.goToGames} />
+          <MatchOpening
+            opening={app.openingMatch}
+            onRetry={controller.retryOpenMatch}
+            onBack={controller.goToGames}
+          />
         ) : (
           <section className="lobby-view" id="lobby-view" aria-label="Games lobby">
             <LobbyApp controller={controller} />
@@ -150,32 +174,69 @@ export default function App() {
   );
 }
 
-function MatchOpening({ opening, onRetry, onBack }: {
+function MatchOpening({
+  opening,
+  onRetry,
+  onBack,
+}: {
   opening: OpeningMatchView;
   onRetry: () => void;
   onBack: () => void;
 }) {
-  return <section className="match-opening" id="match-opening" aria-labelledby="match-opening-title" aria-busy={opening.status === "loading"}>
-    <div className="opening-board" aria-hidden="true">
-      {Array.from({ length: 42 }, (_, index) => <span className="opening-cell" key={index} />)}
-    </div>
-    <div className="opening-copy" role={opening.status === "error" ? "alert" : "status"}>
-      {opening.status === "loading" && <span className="opening-spinner" aria-hidden="true" />}
-      <h2 id="match-opening-title">{opening.title}</h2>
-      <p>{opening.message}</p>
-      {opening.action === "retry" && <Button variant="primary" type="button" onClick={onRetry}>Try again</Button>}
-      {opening.action === "reload" && <Button variant="primary" type="button" onClick={() => window.location.reload()}>Reload game</Button>}
-      {opening.status === "error" && <button className="opening-back-button" type="button" onClick={onBack}>Back to games</button>}
-    </div>
-  </section>;
+  return (
+    <section
+      className="match-opening"
+      id="match-opening"
+      aria-labelledby="match-opening-title"
+      aria-busy={opening.status === "loading"}
+    >
+      <div className="opening-board" aria-hidden="true">
+        {Array.from({ length: 42 }, (_, index) => (
+          <span className="opening-cell" key={index} />
+        ))}
+      </div>
+      <div className="opening-copy" role={opening.status === "error" ? "alert" : "status"}>
+        {opening.status === "loading" && <span className="opening-spinner" aria-hidden="true" />}
+        <h2 id="match-opening-title">{opening.title}</h2>
+        <p>{opening.message}</p>
+        {opening.action === "retry" && (
+          <Button variant="primary" type="button" onClick={onRetry}>
+            Try again
+          </Button>
+        )}
+        {opening.action === "reload" && (
+          <Button variant="primary" type="button" onClick={() => window.location.reload()}>
+            Reload game
+          </Button>
+        )}
+        {opening.status === "error" && (
+          <button className="opening-back-button" type="button" onClick={onBack}>
+            Back to games
+          </button>
+        )}
+      </div>
+    </section>
+  );
 }
 
 function LobbySummary() {
-  const lobby = useSyncExternalStore(lobbyClient.subscribe, lobbyClient.getSnapshot, lobbyClient.getSnapshot);
+  const lobby = useSyncExternalStore(
+    lobbyClient.subscribe,
+    lobbyClient.getSnapshot,
+    lobbyClient.getSnapshot,
+  );
   if (lobby.connection !== "connected") {
-    return <p className="lobby-presence" role="status">{lobby.connection === "connecting" ? "Connecting…" : "Reconnecting…"}</p>;
+    return (
+      <p className="lobby-presence" role="status">
+        {lobby.connection === "connecting" ? "Connecting…" : "Reconnecting…"}
+      </p>
+    );
   }
   if (lobby.totalMatches === null) return null;
   const availableMatches = lobby.totalMatches + lobby.opponentOffers.length;
-  return <p className="lobby-presence" aria-live="polite">{availableMatches} {availableMatches === 1 ? "match" : "matches"} available</p>;
+  return (
+    <p className="lobby-presence" aria-live="polite">
+      {availableMatches} {availableMatches === 1 ? "match" : "matches"} available
+    </p>
+  );
 }

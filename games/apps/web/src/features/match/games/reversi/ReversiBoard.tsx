@@ -1,16 +1,5 @@
-import {
-  useEffect,
-  useLayoutEffect,
-  useRef,
-  useState,
-  type CSSProperties,
-} from "react";
-import {
-  applyAction,
-  BOARD_SIZE,
-  discsToFlip,
-  legalMoves,
-} from "@portfolio-games/reversi";
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
+import { applyAction, BOARD_SIZE, discsToFlip, legalMoves } from "@portfolio-games/reversi";
 import type { PlaceDiscAction, ReversiState } from "@portfolio-games/reversi";
 import type { GameBoardProps } from "../../game-view-types";
 import {
@@ -87,11 +76,7 @@ function countTrailingMovesForSeat(
   seat: PlayerSeat,
 ) {
   let count = 0;
-  for (
-    let index = moves.length - 1;
-    index >= Math.max(0, fromIndex);
-    index -= 1
-  ) {
+  for (let index = moves.length - 1; index >= Math.max(0, fromIndex); index -= 1) {
     if (moves[index]?.seat !== seat) break;
     count += 1;
   }
@@ -113,10 +98,7 @@ function makePresentation(
       column: flipColumn,
       from: from.board[flipRow]?.[flipColumn],
     }))
-    .filter(
-      (cell): cell is PresentedFlip =>
-        cell.from === "first" || cell.from === "second",
-    );
+    .filter((cell): cell is PresentedFlip => cell.from === "first" || cell.from === "second");
   return {
     key: moveKey(matchId, actionCount, seat, row, column),
     matchId,
@@ -128,8 +110,7 @@ function makePresentation(
     inRapidSequence: false,
     // Keep this as the pass event caused by this move, rather than a historic
     // skippedSeat that may now have a legal turn again.
-    skippedSeat:
-      to.skippedSeat && to.nextPlayer === seat ? to.skippedSeat : null,
+    skippedSeat: to.skippedSeat && to.nextPlayer === seat ? to.skippedSeat : null,
     state: to,
     cells,
   };
@@ -141,9 +122,7 @@ export default function ReversiBoard({
   onMovePresentationChange,
 }: GameBoardProps) {
   const state = match.gameState as ReversiState | null;
-  const [presentations, setPresentations] = useState<
-    readonly FlipPresentation[]
-  >([]);
+  const [presentations, setPresentations] = useState<readonly FlipPresentation[]>([]);
   const presentationQueueRef = useRef<readonly FlipPresentation[]>([]);
   const presentationStartedAtRef = useRef<{
     key: string;
@@ -157,17 +136,11 @@ export default function ReversiBoard({
   const pending = parsePlaceAction(match.pendingAction?.action);
   const pendingSeat = match.pendingAction?.seat ?? null;
   const pendingResult =
-    state &&
-    pending &&
-    pendingSeat &&
-    pendingSeat === selfSeat &&
-    state.nextPlayer === pendingSeat
+    state && pending && pendingSeat && pendingSeat === selfSeat && state.nextPlayer === pendingSeat
       ? applyAction(state, pendingSeat, pending)
       : null;
   const optimisticState = pendingResult?.ok ? pendingResult.value : null;
-  const aiMove = Boolean(
-    lastMove && match.aiReveal && match.aiSeat === lastMove.seat,
-  );
+  const aiMove = Boolean(lastMove && match.aiReveal && match.aiSeat === lastMove.seat);
   const hideAiUpdate = aiMove && !match.aiRevealStarted;
 
   useLayoutEffect(() => {
@@ -195,9 +168,7 @@ export default function ReversiBoard({
       // A first snapshot may already contain consecutive moves by one seat
       // after a forced pass. Rebuild before the whole run so every placement
       // and flip is shown in order, including the opening move.
-      const previous = match.status === "active"
-        ? stateBeforeLatestMoveSequence(state)
-        : null;
+      const previous = match.status === "active" ? stateBeforeLatestMoveSequence(state) : null;
       scheduledStateRef.current = previous ?? state;
       replaceQueue([]);
       onMovePresentationChange?.(null);
@@ -258,10 +229,7 @@ export default function ReversiBoard({
       hideAiUpdate && match.aiSeat && lastMove?.seat === match.aiSeat
         ? countTrailingMovesForSeat(state.moves, scheduledCount, match.aiSeat)
         : 0;
-    const visibleActionCount = Math.max(
-      scheduledCount,
-      state.moves.length - hiddenAiMoves,
-    );
+    const visibleActionCount = Math.max(scheduledCount, state.moves.length - hiddenAiMoves);
     while (scheduled && scheduledCount < visibleActionCount) {
       const move = state.moves[scheduledCount];
       if (!move) break;
@@ -274,7 +242,6 @@ export default function ReversiBoard({
         // The validated server history should always replay. If it doesn't,
         // prefer the authoritative snapshot over a stuck or incorrect preview.
         scheduled = state;
-        scheduledCount = state.moves.length;
         scheduledStateRef.current = state;
         replaceQueue([]);
         onMovePresentationChange?.(null);
@@ -299,6 +266,7 @@ export default function ReversiBoard({
     state,
     match.actionCount,
     match.matchId,
+    match.status,
     match.aiSeat,
     match.aiReveal,
     match.aiRevealStarted,
@@ -327,24 +295,11 @@ export default function ReversiBoard({
           }
         : null,
     );
-  }, [
-    activePresentation?.key,
-    activePresentation?.actionCount,
-    activePresentation?.seat,
-    activePresentation?.matchId,
-    activePresentation?.row,
-    activePresentation?.column,
-    activePresentation?.flipCount,
-    activePresentation?.inRapidSequence,
-    activePresentation?.skippedSeat,
-    onMovePresentationChange,
-  ]);
+  }, [activePresentation, onMovePresentationChange]);
 
   useEffect(() => {
     if (!activePresentation) return;
-    const reducedMotion = window.matchMedia(
-      "(prefers-reduced-motion: reduce)",
-    ).matches;
+    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     if (presentationStartedAtRef.current?.key !== activePresentation.key) {
       presentationStartedAtRef.current = {
         key: activePresentation.key,
@@ -355,13 +310,11 @@ export default function ReversiBoard({
       Math.max(0, activePresentation.cells.length - 1) * FLIP_STAGGER_MS,
       FLIP_MAX_DELAY_MS,
     );
-    const handoffPause =
-      presentationQueueRef.current.length > 1 ? MOVE_HANDOFF_PAUSE_MS : 0;
+    const handoffPause = presentationQueueRef.current.length > 1 ? MOVE_HANDOFF_PAUSE_MS : 0;
     const totalDuration = reducedMotion
       ? 180
       : FLIP_START_DELAY_MS + lastDelay + FLIP_DURATION_MS + 60 + handoffPause;
-    const elapsed =
-      performance.now() - presentationStartedAtRef.current.startedAt;
+    const elapsed = performance.now() - presentationStartedAtRef.current.startedAt;
     const clearAfter = Math.max(0, totalDuration - elapsed);
     const activeKey = activePresentation.key;
     const timer = window.setTimeout(() => {
@@ -372,13 +325,10 @@ export default function ReversiBoard({
       setPresentations(next);
     }, clearAfter);
     return () => window.clearTimeout(timer);
-  }, [activePresentation?.key, presentations.length]);
+  }, [activePresentation, presentations.length]);
 
   const displayState =
-    activePresentation?.state ??
-    optimisticState ??
-    scheduledStateRef.current ??
-    state;
+    activePresentation?.state ?? optimisticState ?? scheduledStateRef.current ?? state;
   const displayedMove = activePresentation
     ? {
         seat: activePresentation.seat,
@@ -390,26 +340,17 @@ export default function ReversiBoard({
     activePresentation || presentations.length > 0 || pending || hideAiUpdate,
   );
   const legal = new Set(
-    displayState &&
-      match.canPlay &&
-      !presentationBlocked &&
-      match.outcome === null
+    displayState && match.canPlay && !presentationBlocked && match.outcome === null
       ? legalMoves(displayState, displayState.nextPlayer ?? "first").map(
           (move) => `${move.row}-${move.column}`,
         )
       : [],
   );
   const darkSeat = displayState?.startingPlayer ?? state?.startingPlayer;
-  const counts = displayState && darkSeat
-    ? countReversiDiscs(displayState.board, darkSeat)
-    : null;
+  const counts = displayState && darkSeat ? countReversiDiscs(displayState.board, darkSeat) : null;
   const passState = activePresentation ? activePresentation.state : state;
-  const skippedSeat = activePresentation
-    ? activePresentation.skippedSeat
-    : passState?.skippedSeat;
-  const passNotice = Boolean(
-    !hideAiUpdate && skippedSeat && passState?.outcome === null,
-  );
+  const skippedSeat = activePresentation ? activePresentation.skippedSeat : passState?.skippedSeat;
+  const passNotice = Boolean(!hideAiUpdate && skippedSeat && passState?.outcome === null);
   const passMessage = (() => {
     if (activePresentation && skippedSeat) {
       return selfSeat === skippedSeat
@@ -438,10 +379,7 @@ export default function ReversiBoard({
   return (
     <div className="reversi-board-wrap">
       {counts && (
-        <div
-          className="reversi-score"
-          aria-label={`Dark ${counts.dark}, light ${counts.light}`}
-        >
+        <div className="reversi-score" aria-label={`Dark ${counts.dark}, light ${counts.light}`}>
           <span>
             <i className="reversi-score-disc is-dark" aria-hidden="true" />
             Dark <strong>{counts.dark}</strong>
@@ -473,8 +411,7 @@ export default function ReversiBoard({
               {row.map((seat, columnIndex) => {
                 const canPlace = legal.has(`${rowIndex}-${columnIndex}`);
                 const isLast =
-                  displayedMove?.row === rowIndex &&
-                  displayedMove.column === columnIndex;
+                  displayedMove?.row === rowIndex && displayedMove.column === columnIndex;
                 const hiddenAi = isHiddenAiMoveCell(
                   hideAiUpdate,
                   match.aiSeat,
@@ -483,15 +420,11 @@ export default function ReversiBoard({
                   columnIndex,
                 );
                 const pendingMove =
-                  !optimisticState &&
-                  pending?.row === rowIndex &&
-                  pending.column === columnIndex;
+                  !optimisticState && pending?.row === rowIndex && pending.column === columnIndex;
                 const placed =
-                  activePresentation?.row === rowIndex &&
-                  activePresentation.column === columnIndex;
+                  activePresentation?.row === rowIndex && activePresentation.column === columnIndex;
                 const flipping = activePresentation?.cells.find(
-                  (cell) =>
-                    cell.row === rowIndex && cell.column === columnIndex,
+                  (cell) => cell.row === rowIndex && cell.column === columnIndex,
                 );
                 const owner = hiddenAi ? null : seat;
                 const discColor = owner && darkSeat ? reversiDiscColor(owner, darkSeat) : null;
@@ -501,17 +434,15 @@ export default function ReversiBoard({
                     ? "Legal move"
                     : "Empty";
                 return (
-                  <div
-                    role="gridcell"
-                    className="reversi-grid-cell"
-                    key={columnIndex}
-                  >
+                  <div role="gridcell" className="reversi-grid-cell" key={columnIndex}>
                     <button
                       className={`reversi-square${discColor ? ` is-${discColor}` : ""}${canPlace ? " is-legal" : ""}${isLast && !hiddenAi ? " is-last-move" : ""}${pendingMove ? " is-pending" : ""}${hiddenAi ? " is-ai-hidden" : ""}${placed ? " is-placed" : ""}${flipping ? " is-flipping" : ""}`}
                       type="button"
                       data-row={rowIndex}
                       data-column={columnIndex}
-                      data-flip-from={flipping && darkSeat ? reversiDiscColor(flipping.from, darkSeat) : undefined}
+                      data-flip-from={
+                        flipping && darkSeat ? reversiDiscColor(flipping.from, darkSeat) : undefined
+                      }
                       style={
                         flipping
                           ? ({
@@ -521,10 +452,7 @@ export default function ReversiBoard({
                       }
                       aria-label={`Row ${rowIndex + 1}, column ${columnIndex + 1}: ${label}${canPlace ? ", place disc" : ""}`}
                       disabled={
-                        !canPlace ||
-                        !match.canPlay ||
-                        presentationBlocked ||
-                        match.outcome !== null
+                        !canPlace || !match.canPlay || presentationBlocked || match.outcome !== null
                       }
                       onClick={() =>
                         controller.playAction({
@@ -535,18 +463,8 @@ export default function ReversiBoard({
                       }
                     >
                       <span className="reversi-disc" aria-hidden="true" />
-                      {canPlace && (
-                        <span
-                          className="reversi-legal-dot"
-                          aria-hidden="true"
-                        />
-                      )}
-                      {pendingMove && (
-                        <span
-                          className="reversi-pending-disc"
-                          aria-hidden="true"
-                        />
-                      )}
+                      {canPlace && <span className="reversi-legal-dot" aria-hidden="true" />}
+                      {pendingMove && <span className="reversi-pending-disc" aria-hidden="true" />}
                     </button>
                   </div>
                 );

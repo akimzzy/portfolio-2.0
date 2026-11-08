@@ -34,11 +34,7 @@ export type ConnectFourState = Readonly<{
   outcome: GameOutcome | null;
 }>;
 export type MoveErrorCode =
-  | "invalid-player"
-  | "invalid-action"
-  | "wrong-turn"
-  | "column-full"
-  | "match-finished";
+  "invalid-player" | "invalid-action" | "wrong-turn" | "column-full" | "match-finished";
 export type MoveResult = GameActionResult<ConnectFourState, MoveErrorCode>;
 
 function opponent(player: PlayerSeat): PlayerSeat {
@@ -46,12 +42,9 @@ function opponent(player: PlayerSeat): PlayerSeat {
 }
 
 export function createGame(startingPlayer: PlayerSeat): ConnectFourState {
-  if (!isPlayerSeat(startingPlayer))
-    throw new TypeError("Invalid starting player seat.");
+  if (!isPlayerSeat(startingPlayer)) throw new TypeError("Invalid starting player seat.");
   const board = Object.freeze(
-    Array.from({ length: ROWS }, () =>
-      Object.freeze(new Array<Cell>(COLUMNS).fill(null)),
-    ),
+    Array.from({ length: ROWS }, () => Object.freeze(new Array<Cell>(COLUMNS).fill(null))),
   );
   return Object.freeze({
     startingPlayer,
@@ -62,17 +55,9 @@ export function createGame(startingPlayer: PlayerSeat): ConnectFourState {
   });
 }
 
-export function parseDropTokenAction(
-  input: unknown,
-): ValidationResult<DropTokenAction> {
-  if (
-    !isExactObject(input, ["type", "column"]) ||
-    input.type !== "drop-token"
-  ) {
-    return invalid(
-      "",
-      "Expected a drop-token action with only type and column.",
-    );
+export function parseDropTokenAction(input: unknown): ValidationResult<DropTokenAction> {
+  if (!isExactObject(input, ["type", "column"]) || input.type !== "drop-token") {
+    return invalid("", "Expected a drop-token action with only type and column.");
   }
   if (
     typeof input.column !== "number" ||
@@ -88,12 +73,7 @@ export function parseDropTokenAction(
   };
 }
 
-function connectedFour(
-  board: Board,
-  row: number,
-  column: number,
-  player: PlayerSeat,
-): boolean {
+function connectedFour(board: Board, row: number, column: number, player: PlayerSeat): boolean {
   const directions = [
     [0, 1],
     [1, 0],
@@ -105,13 +85,7 @@ function connectedFour(
     for (const sign of [-1, 1]) {
       let r = row + dr * sign;
       let c = column + dc * sign;
-      while (
-        r >= 0 &&
-        r < ROWS &&
-        c >= 0 &&
-        c < COLUMNS &&
-        board[r]?.[c] === player
-      ) {
+      while (r >= 0 && r < ROWS && c >= 0 && c < COLUMNS && board[r]?.[c] === player) {
         count++;
         r += dr * sign;
         c += dc * sign;
@@ -127,7 +101,12 @@ function connectedFour(
  * Moves only add tokens, so a line containing both seats can never reopen.
  */
 export function hasPossibleConnectFour(board: Board): boolean {
-  const directions = [[0, 1], [1, 0], [1, 1], [1, -1]] as const;
+  const directions = [
+    [0, 1],
+    [1, 0],
+    [1, 1],
+    [1, -1],
+  ] as const;
   for (let row = 0; row < ROWS; row++) {
     for (let column = 0; column < COLUMNS; column++) {
       for (const [dr, dc] of directions) {
@@ -155,12 +134,9 @@ export function applyAction(
   action: unknown,
   rulesVersion: ConnectFourRulesVersion = RULES_VERSION,
 ): MoveResult {
-  if (state.outcome !== null)
-    return { ok: false, error: { code: "match-finished" } };
-  if (!isPlayerSeat(player))
-    return { ok: false, error: { code: "invalid-player" } };
-  if (player !== state.nextPlayer)
-    return { ok: false, error: { code: "wrong-turn" } };
+  if (state.outcome !== null) return { ok: false, error: { code: "match-finished" } };
+  if (!isPlayerSeat(player)) return { ok: false, error: { code: "invalid-player" } };
+  if (player !== state.nextPlayer) return { ok: false, error: { code: "wrong-turn" } };
   const parsed = parseDropTokenAction(action);
   if (!parsed.ok) return { ok: false, error: { code: "invalid-action" } };
   const { column } = parsed.value;
@@ -198,15 +174,7 @@ export function parseConnectFourState(
   input: unknown,
   rulesVersion: ConnectFourRulesVersion = RULES_VERSION,
 ): ValidationResult<ConnectFourState> {
-  if (
-    !isExactObject(input, [
-      "startingPlayer",
-      "board",
-      "moves",
-      "nextPlayer",
-      "outcome",
-    ])
-  ) {
+  if (!isExactObject(input, ["startingPlayer", "board", "moves", "nextPlayer", "outcome"])) {
     return invalid("", "Invalid Connect Four state fields.");
   }
   if (!isPlayerSeat(input.startingPlayer))
@@ -216,20 +184,22 @@ export function parseConnectFourState(
   if (
     !Array.isArray(input.board) ||
     input.board.length !== ROWS ||
-    input.board.some(
-      (row: unknown) => !Array.isArray(row) || row.length !== COLUMNS,
-    )
+    input.board.some((row: unknown) => !Array.isArray(row) || row.length !== COLUMNS)
   ) {
     return invalid("board", "Expected a 6-row, 7-column board.");
   }
   let state = createGame(input.startingPlayer);
   for (let i = 0; i < input.moves.length; i++) {
-    if (state.nextPlayer === null)
-      return invalid(`moves.${i}`, "Move follows a finished game.");
-    const result = applyAction(state, state.nextPlayer, {
-      type: "drop-token",
-      column: input.moves[i],
-    }, rulesVersion);
+    if (state.nextPlayer === null) return invalid(`moves.${i}`, "Move follows a finished game.");
+    const result = applyAction(
+      state,
+      state.nextPlayer,
+      {
+        type: "drop-token",
+        column: input.moves[i],
+      },
+      rulesVersion,
+    );
     if (!result.ok) return invalid(`moves.${i}`, "Illegal move history.");
     state = result.value;
   }
@@ -238,20 +208,13 @@ export function parseConnectFourState(
     if (!Array.isArray(cells)) return invalid("board", "Invalid board row.");
     for (let column = 0; column < COLUMNS; column++) {
       if (cells[column] !== state.board[row]?.[column])
-        return invalid(
-          `board.${row}.${column}`,
-          "Board differs from legal move history.",
-        );
+        return invalid(`board.${row}.${column}`, "Board differs from legal move history.");
     }
   }
   if (input.nextPlayer !== state.nextPlayer)
-    return invalid(
-      "nextPlayer",
-      "Next player differs from legal move history.",
-    );
+    return invalid("nextPlayer", "Next player differs from legal move history.");
   if (input.outcome === null) {
-    if (state.outcome !== null)
-      return invalid("outcome", "Missing terminal outcome.");
+    if (state.outcome !== null) return invalid("outcome", "Missing terminal outcome.");
   } else {
     const parsed = parseGameOutcome(input.outcome);
     if (
@@ -274,8 +237,7 @@ export function parseConnectFourCommand(
 ): ValidationResult<ActionCommand<DropTokenAction>> {
   const parsed = parseActionCommand(input, parseDropTokenAction);
   if (!parsed.ok) return parsed;
-  if (parsed.value.gameId !== GAME_ID)
-    return invalid("gameId", "Unsupported game.");
+  if (parsed.value.gameId !== GAME_ID) return invalid("gameId", "Unsupported game.");
   if (parsed.value.rulesVersion !== rulesVersion)
     return invalid("rulesVersion", "Unsupported Connect Four rules version.");
   return parsed;
@@ -287,8 +249,7 @@ export function parseConnectFourStateMessage(
 ): ValidationResult<StateMessage<ConnectFourState>> {
   const parsed = parseStateMessage(input, (state) => parseConnectFourState(state, rulesVersion));
   if (!parsed.ok) return parsed;
-  if (parsed.value.gameId !== GAME_ID)
-    return invalid("gameId", "Unsupported game.");
+  if (parsed.value.gameId !== GAME_ID) return invalid("gameId", "Unsupported game.");
   if (parsed.value.rulesVersion !== rulesVersion)
     return invalid("rulesVersion", "Unsupported Connect Four rules version.");
   return parsed;
@@ -306,7 +267,8 @@ export const connectFour: TwoPlayerGameModule<
   playerCount: "2-player match",
   rulesVersion: RULES_VERSION,
   supportedRulesVersions: Object.freeze([1, RULES_VERSION] as const),
-  getSessionPolicy: (_rulesVersion: ConnectFourRulesVersion) => Object.freeze({ turnDurationMs: 45_000, reconnectDurationMs: 60_000 }),
+  getSessionPolicy: (_rulesVersion: ConnectFourRulesVersion) =>
+    Object.freeze({ turnDurationMs: 45_000, reconnectDurationMs: 60_000 }),
   createState: createGame,
   parseAction: parseDropTokenAction,
   parseState: parseConnectFourState,
@@ -315,9 +277,18 @@ export const connectFour: TwoPlayerGameModule<
   getNextPlayer: (state: ConnectFourState) => state.nextPlayer,
   getStartingPlayer: (state: ConnectFourState) => state.startingPlayer,
   getActionCount: (state: ConnectFourState) => state.moves.length,
-  getLastActionPlayer: (state: ConnectFourState) => state.moves.length === 0 ? null : state.moves.length % 2 === 1
-    ? state.startingPlayer
-    : state.startingPlayer === "first" ? "second" : "first",
+  getLastActionPlayer: (state: ConnectFourState) =>
+    state.moves.length === 0
+      ? null
+      : state.moves.length % 2 === 1
+        ? state.startingPlayer
+        : state.startingPlayer === "first"
+          ? "second"
+          : "first",
+  getHistorySnapshot: (state: ConnectFourState) => ({
+    board: state.board,
+    startingPlayer: state.startingPlayer,
+  }),
 });
 
 /** Type-erased adapter shared by the Worker and web platform registries. */

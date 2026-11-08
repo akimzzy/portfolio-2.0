@@ -8,7 +8,10 @@ import path from "node:path";
 import test from "node:test";
 import WebSocket from "ws";
 import { RULES_VERSION } from "@portfolio-games/connect-four";
-import { legalMoves as legalReversiMoves, RULES_VERSION as REVERSI_RULES_VERSION } from "@portfolio-games/reversi";
+import {
+  legalMoves as legalReversiMoves,
+  RULES_VERSION as REVERSI_RULES_VERSION,
+} from "@portfolio-games/reversi";
 
 const gamesRoot = path.resolve(import.meta.dirname, "../../..");
 const origin = "http://localhost:4178";
@@ -16,21 +19,53 @@ const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 async function unusedPort() {
   const server = net.createServer();
-  await new Promise((resolve, reject) => server.once("error", reject).listen(0, "127.0.0.1", resolve));
+  await new Promise((resolve, reject) =>
+    server.once("error", reject).listen(0, "127.0.0.1", resolve),
+  );
   const { port } = server.address();
-  await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  await new Promise((resolve, reject) =>
+    server.close((error) => (error ? reject(error) : resolve())),
+  );
   return port;
 }
 
 async function startWorker(port, persistencePath) {
-  const child = spawn(process.execPath, [
-    "node_modules/wrangler/bin/wrangler.js", "dev", "--local",
-    "--config", "apps/worker/wrangler.jsonc", "--ip", "127.0.0.1", "--port", String(port),
-    "--persist-to", persistencePath, "--show-interactive-dev-session=false", "--log-level", "error",
-  ], { cwd: gamesRoot, stdio: ["ignore", "pipe", "pipe"] });
+  const child = spawn(
+    process.execPath,
+    [
+      "node_modules/wrangler/bin/wrangler.js",
+      "dev",
+      "--local",
+      // Never let integration tests inherit `.dev.vars` credentials and write to the shared Supabase project.
+      "--var",
+      "APP_ENV:development",
+      "--var",
+      "SUPABASE_URL:",
+      "--var",
+      "SUPABASE_SECRET_KEY:",
+      "--var",
+      "SUPABASE_SERVICE_ROLE_KEY:",
+      "--config",
+      "apps/worker/wrangler.jsonc",
+      "--ip",
+      "127.0.0.1",
+      "--port",
+      String(port),
+      "--persist-to",
+      persistencePath,
+      "--show-interactive-dev-session=false",
+      "--log-level",
+      "error",
+    ],
+    { cwd: gamesRoot, stdio: ["ignore", "pipe", "pipe"] },
+  );
   let output = "";
-  child.stdout.on("data", (chunk) => { output += chunk.toString(); });
-  child.stderr.on("data", (chunk) => { output += chunk.toString(); });
+  child.stdout.on("data", (chunk) => {
+    output += chunk.toString();
+  });
+  child.stderr.on("data", (chunk) => {
+    output += chunk.toString();
+  });
   const baseUrl = `http://127.0.0.1:${port}`;
   const startedAt = Date.now();
   while (Date.now() - startedAt < 30_000) {
@@ -38,7 +73,9 @@ async function startWorker(port, persistencePath) {
     try {
       const response = await fetch(`${baseUrl}/health`);
       if (response.ok) return { process: child, baseUrl, output: () => output };
-    } catch {}
+    } catch {
+      // The Worker is still starting; retry health checks until the startup deadline.
+    }
     await delay(100);
   }
   await stopWorker(child);
@@ -71,7 +108,11 @@ function socketClient(baseUrl, matchId, seatToken) {
   client.socket = socket;
   socket.on("message", (raw) => {
     let payload;
-    try { payload = JSON.parse(raw.toString()); } catch { return; }
+    try {
+      payload = JSON.parse(raw.toString());
+    } catch {
+      return;
+    }
     const index = client.waiters.findIndex((waiter) => waiter.predicate(payload));
     if (index >= 0) client.waiters.splice(index, 1)[0].resolve(payload);
     else client.queue.push(payload);
@@ -90,11 +131,14 @@ function socketClient(baseUrl, matchId, seatToken) {
         client.waiters = client.waiters.filter((candidate) => candidate !== waiter);
         reject(new Error("Worker socket closed while waiting for an event."));
       };
-      const waiter = { predicate, resolve: (value) => {
-        clearTimeout(timer);
-        socket.off("close", onClose);
-        resolve(value);
-      } };
+      const waiter = {
+        predicate,
+        resolve: (value) => {
+          clearTimeout(timer);
+          socket.off("close", onClose);
+          resolve(value);
+        },
+      };
       timer = setTimeout(() => {
         client.waiters = client.waiters.filter((candidate) => candidate !== waiter);
         socket.off("close", onClose);
@@ -124,7 +168,11 @@ function lobbySocketClient(baseUrl, visitorId = null) {
   client.socket = socket;
   socket.on("message", (raw) => {
     let payload;
-    try { payload = JSON.parse(raw.toString()); } catch { return; }
+    try {
+      payload = JSON.parse(raw.toString());
+    } catch {
+      return;
+    }
     const index = client.waiters.findIndex((waiter) => waiter.predicate(payload));
     if (index >= 0) client.waiters.splice(index, 1)[0].resolve(payload);
     else client.queue.push(payload);
@@ -138,11 +186,14 @@ function lobbySocketClient(baseUrl, visitorId = null) {
     if (queuedIndex >= 0) return Promise.resolve(client.queue.splice(queuedIndex, 1)[0]);
     return new Promise((resolve, reject) => {
       let timer;
-      const waiter = { predicate, resolve: (value) => {
-        clearTimeout(timer);
-        socket.off("close", onClose);
-        resolve(value);
-      } };
+      const waiter = {
+        predicate,
+        resolve: (value) => {
+          clearTimeout(timer);
+          socket.off("close", onClose);
+          resolve(value);
+        },
+      };
       const onClose = () => {
         clearTimeout(timer);
         client.waiters = client.waiters.filter((candidate) => candidate !== waiter);
@@ -168,30 +219,34 @@ function lobbySocketClient(baseUrl, visitorId = null) {
   return client;
 }
 
-test("lobby snapshots report available matches without visitor presence counts", { timeout: 30_000 }, async (t) => {
-  const port = await unusedPort();
-  const persistencePath = await mkdtemp(path.join(os.tmpdir(), "portfolio-games-lobby-"));
-  let worker;
-  const clients = [];
-  t.after(async () => {
-    clients.forEach((client) => client.close());
-    if (worker) await stopWorker(worker.process);
-    await rm(persistencePath, { recursive: true, force: true });
-  });
+test(
+  "lobby snapshots report available matches without visitor presence counts",
+  { timeout: 30_000 },
+  async (t) => {
+    const port = await unusedPort();
+    const persistencePath = await mkdtemp(path.join(os.tmpdir(), "portfolio-games-lobby-"));
+    let worker;
+    const clients = [];
+    t.after(async () => {
+      clients.forEach((client) => client.close());
+      if (worker) await stopWorker(worker.process);
+      await rm(persistencePath, { recursive: true, force: true });
+    });
 
-  worker = await startWorker(port, persistencePath);
-  const first = lobbySocketClient(worker.baseUrl);
-  clients.push(first);
-  const firstSnapshot = await first.identify();
-  assert.equal(firstSnapshot.totalMatches, 0);
-  assert.equal("onlineCount" in firstSnapshot, false);
+    worker = await startWorker(port, persistencePath);
+    const first = lobbySocketClient(worker.baseUrl);
+    clients.push(first);
+    const firstSnapshot = await first.identify();
+    assert.equal(firstSnapshot.totalMatches, 0);
+    assert.equal("onlineCount" in firstSnapshot, false);
 
-  const second = lobbySocketClient(worker.baseUrl, "B".repeat(22));
-  clients.push(second);
-  const secondSnapshot = await second.identify();
-  assert.equal(secondSnapshot.totalMatches, 0);
-  assert.equal("onlineCount" in secondSnapshot, false);
-});
+    const second = lobbySocketClient(worker.baseUrl, "B".repeat(22));
+    clients.push(second);
+    const secondSnapshot = await second.identify();
+    assert.equal(secondSnapshot.totalMatches, 0);
+    assert.equal("onlineCount" in secondSnapshot, false);
+  },
+);
 
 test("competing joins can claim only one seat", { timeout: 30_000 }, async (t) => {
   const port = await unusedPort();
@@ -204,730 +259,1130 @@ test("competing joins can claim only one seat", { timeout: 30_000 }, async (t) =
 
   worker = await startWorker(port, persistencePath);
   const created = await api(worker.baseUrl, "/v1/matches", {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ gameId: "connect-four", rulesVersion: RULES_VERSION, visibility: "public", seriesTarget: 1, displayName: "Host" }),
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      gameId: "connect-four",
+      rulesVersion: RULES_VERSION,
+      visibility: "public",
+      seriesTarget: 1,
+      displayName: "Host",
+    }),
   });
   assert.equal(created.response.status, 201);
 
-  const joins = await Promise.all(["Visitor A", "Visitor B"].map((displayName) => api(
-    worker.baseUrl,
-    `/v1/matches/${created.body.matchId}/join`,
-    { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ rulesVersion: RULES_VERSION, displayName }) },
-  )));
+  const joins = await Promise.all(
+    ["Visitor A", "Visitor B"].map((displayName) =>
+      api(worker.baseUrl, `/v1/matches/${created.body.matchId}/join`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rulesVersion: RULES_VERSION, displayName }),
+      }),
+    ),
+  );
   assert.deepEqual(joins.map((result) => result.response.status).sort(), [200, 409]);
 });
 
-test("a room cannot be cancelled after a concurrent join has claimed its seat", { timeout: 30_000 }, async (t) => {
-  const port = await unusedPort();
-  const persistencePath = await mkdtemp(path.join(os.tmpdir(), "portfolio-games-cancel-race-"));
-  let worker;
-  t.after(async () => {
-    if (worker) await stopWorker(worker.process);
-    await rm(persistencePath, { recursive: true, force: true });
-  });
+test(
+  "a room cannot be cancelled after a concurrent join has claimed its seat",
+  { timeout: 30_000 },
+  async (t) => {
+    const port = await unusedPort();
+    const persistencePath = await mkdtemp(path.join(os.tmpdir(), "portfolio-games-cancel-race-"));
+    let worker;
+    t.after(async () => {
+      if (worker) await stopWorker(worker.process);
+      await rm(persistencePath, { recursive: true, force: true });
+    });
 
-  worker = await startWorker(port, persistencePath);
-  const created = await api(worker.baseUrl, "/v1/matches", {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ gameId: "connect-four", rulesVersion: RULES_VERSION, visibility: "public", seriesTarget: 1, displayName: "Host" }),
-  });
-  assert.equal(created.response.status, 201);
+    worker = await startWorker(port, persistencePath);
+    const created = await api(worker.baseUrl, "/v1/matches", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        gameId: "connect-four",
+        rulesVersion: RULES_VERSION,
+        visibility: "public",
+        seriesTarget: 1,
+        displayName: "Host",
+      }),
+    });
+    assert.equal(created.response.status, 201);
 
-  const [cancelled, joined] = await Promise.all([
-    api(worker.baseUrl, `/v1/matches/${created.body.matchId}/cancel`, {
-      method: "POST", headers: { Authorization: `Bearer ${created.body.seatToken}` },
-    }),
-    api(worker.baseUrl, `/v1/matches/${created.body.matchId}/join`, {
-      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ rulesVersion: RULES_VERSION, displayName: "Visitor" }),
-    }),
-  ]);
+    const [cancelled, joined] = await Promise.all([
+      api(worker.baseUrl, `/v1/matches/${created.body.matchId}/cancel`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${created.body.seatToken}` },
+      }),
+      api(worker.baseUrl, `/v1/matches/${created.body.matchId}/join`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rulesVersion: RULES_VERSION, displayName: "Visitor" }),
+      }),
+    ]);
 
-  const hostSnapshot = await api(worker.baseUrl, `/v1/matches/${created.body.matchId}`, {
-    headers: { Authorization: `Bearer ${created.body.seatToken}` },
-  });
-  if (joined.response.status === 200) {
-    assert.equal(cancelled.response.status, 409);
-    assert.equal(hostSnapshot.body.status, "waiting");
-    assert.equal(hostSnapshot.body.playerNames[1], "Visitor");
-  } else {
-    assert.ok([409, 410].includes(joined.response.status));
-    assert.equal(cancelled.response.status, 200);
-    assert.equal(hostSnapshot.body.status, "cancelled");
-  }
-});
+    const hostSnapshot = await api(worker.baseUrl, `/v1/matches/${created.body.matchId}`, {
+      headers: { Authorization: `Bearer ${created.body.seatToken}` },
+    });
+    if (joined.response.status === 200) {
+      assert.equal(cancelled.response.status, 409);
+      assert.equal(hostSnapshot.body.status, "waiting");
+      assert.equal(hostSnapshot.body.playerNames[1], "Visitor");
+    } else {
+      assert.ok([409, 410].includes(joined.response.status));
+      assert.equal(cancelled.response.status, 200);
+      assert.equal(hostSnapshot.body.status, "cancelled");
+    }
+  },
+);
 
-test("two concurrent moves from one seat produce one accepted action", { timeout: 30_000 }, async (t) => {
-  const port = await unusedPort();
-  const persistencePath = await mkdtemp(path.join(os.tmpdir(), "portfolio-games-action-race-"));
-  let worker;
-  const clients = [];
-  t.after(async () => {
-    clients.forEach((client) => client.close());
-    if (worker) await stopWorker(worker.process);
-    await rm(persistencePath, { recursive: true, force: true });
-  });
+test(
+  "two concurrent moves from one seat produce one accepted action",
+  { timeout: 30_000 },
+  async (t) => {
+    const port = await unusedPort();
+    const persistencePath = await mkdtemp(path.join(os.tmpdir(), "portfolio-games-action-race-"));
+    let worker;
+    const clients = [];
+    t.after(async () => {
+      clients.forEach((client) => client.close());
+      if (worker) await stopWorker(worker.process);
+      await rm(persistencePath, { recursive: true, force: true });
+    });
 
-  worker = await startWorker(port, persistencePath);
-  const created = await api(worker.baseUrl, "/v1/matches", {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ gameId: "connect-four", rulesVersion: RULES_VERSION, visibility: "public", seriesTarget: 1 }),
-  });
-  assert.equal(created.response.status, 201);
-  const joined = await api(worker.baseUrl, `/v1/matches/${created.body.matchId}/join`, {
-    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ rulesVersion: RULES_VERSION }),
-  });
-  assert.equal(joined.response.status, 200);
+    worker = await startWorker(port, persistencePath);
+    const created = await api(worker.baseUrl, "/v1/matches", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        gameId: "connect-four",
+        rulesVersion: RULES_VERSION,
+        visibility: "public",
+        seriesTarget: 1,
+      }),
+    });
+    assert.equal(created.response.status, 201);
+    const joined = await api(worker.baseUrl, `/v1/matches/${created.body.matchId}/join`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ rulesVersion: RULES_VERSION }),
+    });
+    assert.equal(joined.response.status, 200);
 
-  const first = socketClient(worker.baseUrl, created.body.matchId, created.body.seatToken);
-  const second = socketClient(worker.baseUrl, created.body.matchId, joined.body.seatToken);
-  clients.push(first, second);
-  await Promise.all([first.openAndAuthenticate(), second.openAndAuthenticate()]);
-  const activePredicate = (payload) => payload.type === "match" && payload.match.status === "active";
-  const [firstActive, secondActive] = await Promise.all([first.waitFor(activePredicate), second.waitFor(activePredicate)]);
-  const active = firstActive.match.revision >= secondActive.match.revision ? firstActive.match : secondActive.match;
-  const starter = active.awaitingTurnReceipt.seat === "first" ? first : second;
-  const started = Promise.all([
-    first.waitFor((payload) => payload.type === "match" && payload.match.turnDeadline !== null),
-    second.waitFor((payload) => payload.type === "match" && payload.match.turnDeadline !== null),
-  ]);
-  starter.send({ type: "turn-received", revision: active.revision });
-  const [firstReady, secondReady] = await started;
-  const ready = firstReady.match.revision >= secondReady.match.revision ? firstReady.match : secondReady.match;
-  const mover = ready.state.nextPlayer === "first" ? first : second;
-  const commands = ["race-action-a", "race-action-b"].map((actionId, index) => ({
-    protocolVersion: 1,
-    type: "submit-action",
-    gameId: "connect-four",
-    rulesVersion: RULES_VERSION,
-    matchId: created.body.matchId,
-    actionId,
-    expectedRevision: ready.revision,
-    action: { type: "drop-token", column: index + 2 },
-  }));
-  const responseA = mover.waitFor((payload) => payload.acceptedActionId === commands[0].actionId || payload.actionId === commands[0].actionId);
-  const responseB = mover.waitFor((payload) => payload.acceptedActionId === commands[1].actionId || payload.actionId === commands[1].actionId);
-  mover.send(commands[0]);
-  mover.send(commands[1]);
-  const [resultA, resultB] = await Promise.all([responseA, responseB]);
-  assert.equal([resultA, resultB].filter((result) => result.acceptedActionId).length, 1);
-  assert.equal([resultA, resultB].filter((result) => result.type === "action-rejected").length, 1);
+    const first = socketClient(worker.baseUrl, created.body.matchId, created.body.seatToken);
+    const second = socketClient(worker.baseUrl, created.body.matchId, joined.body.seatToken);
+    clients.push(first, second);
+    await Promise.all([first.openAndAuthenticate(), second.openAndAuthenticate()]);
+    const activePredicate = (payload) =>
+      payload.type === "match" && payload.match.status === "active";
+    const [firstActive, secondActive] = await Promise.all([
+      first.waitFor(activePredicate),
+      second.waitFor(activePredicate),
+    ]);
+    const active =
+      firstActive.match.revision >= secondActive.match.revision
+        ? firstActive.match
+        : secondActive.match;
+    const starter = active.awaitingTurnReceipt.seat === "first" ? first : second;
+    const started = Promise.all([
+      first.waitFor((payload) => payload.type === "match" && payload.match.turnDeadline !== null),
+      second.waitFor((payload) => payload.type === "match" && payload.match.turnDeadline !== null),
+    ]);
+    starter.send({ type: "turn-received", revision: active.revision });
+    const [firstReady, secondReady] = await started;
+    const ready =
+      firstReady.match.revision >= secondReady.match.revision
+        ? firstReady.match
+        : secondReady.match;
+    const mover = ready.state.nextPlayer === "first" ? first : second;
+    const commands = ["race-action-a", "race-action-b"].map((actionId, index) => ({
+      protocolVersion: 1,
+      type: "submit-action",
+      gameId: "connect-four",
+      rulesVersion: RULES_VERSION,
+      matchId: created.body.matchId,
+      actionId,
+      expectedRevision: ready.revision,
+      action: { type: "drop-token", column: index + 2 },
+    }));
+    const responseA = mover.waitFor(
+      (payload) =>
+        payload.acceptedActionId === commands[0].actionId ||
+        payload.actionId === commands[0].actionId,
+    );
+    const responseB = mover.waitFor(
+      (payload) =>
+        payload.acceptedActionId === commands[1].actionId ||
+        payload.actionId === commands[1].actionId,
+    );
+    mover.send(commands[0]);
+    mover.send(commands[1]);
+    const [resultA, resultB] = await Promise.all([responseA, responseB]);
+    assert.equal([resultA, resultB].filter((result) => result.acceptedActionId).length, 1);
+    assert.equal(
+      [resultA, resultB].filter((result) => result.type === "action-rejected").length,
+      1,
+    );
 
-  const snapshot = await api(worker.baseUrl, `/v1/matches/${created.body.matchId}`, {
-    headers: { Authorization: `Bearer ${created.body.seatToken}` },
-  });
-  assert.equal(snapshot.body.state.moves.length, 1);
-});
+    const snapshot = await api(worker.baseUrl, `/v1/matches/${created.body.matchId}`, {
+      headers: { Authorization: `Bearer ${created.body.seatToken}` },
+    });
+    assert.equal(snapshot.body.state.moves.length, 1);
+  },
+);
 
-test("AI matches start on demand and make a server-authoritative reply in the same turn flow", { timeout: 30_000 }, async (t) => {
-  const port = await unusedPort();
-  const persistencePath = await mkdtemp(path.join(os.tmpdir(), "portfolio-games-ai-match-"));
-  let worker;
-  const clients = [];
-  t.after(async () => {
-    clients.forEach((client) => client.close());
-    if (worker) await stopWorker(worker.process);
-    await rm(persistencePath, { recursive: true, force: true });
-  });
+test(
+  "AI matches start on demand and make a server-authoritative reply in the same turn flow",
+  { timeout: 30_000 },
+  async (t) => {
+    const port = await unusedPort();
+    const persistencePath = await mkdtemp(path.join(os.tmpdir(), "portfolio-games-ai-match-"));
+    let worker;
+    const clients = [];
+    t.after(async () => {
+      clients.forEach((client) => client.close());
+      if (worker) await stopWorker(worker.process);
+      await rm(persistencePath, { recursive: true, force: true });
+    });
 
-  worker = await startWorker(port, persistencePath);
-  const unsupportedGame = await api(worker.baseUrl, "/v1/matches/ai", {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ gameId: "unregistered-game", profileId: "standard", seriesTarget: 1, displayName: "Test Player" }),
-  });
-  assert.equal(unsupportedGame.response.status, 404);
-  const unsupportedProfile = await api(worker.baseUrl, "/v1/matches/ai", {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ gameId: "connect-four", profileId: "unregistered-profile", seriesTarget: 1, displayName: "Test Player" }),
-  });
-  assert.equal(unsupportedProfile.response.status, 400);
-  const created = await api(worker.baseUrl, "/v1/matches/ai", {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ gameId: "connect-four", profileId: "standard", seriesTarget: 1, displayName: "Test Player" }),
-  });
-  assert.equal(created.response.status, 201);
-  assert.equal(created.body.seat, "second");
+    worker = await startWorker(port, persistencePath);
+    const unsupportedGame = await api(worker.baseUrl, "/v1/matches/ai", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        gameId: "unregistered-game",
+        profileId: "standard",
+        seriesTarget: 1,
+        displayName: "Test Player",
+      }),
+    });
+    assert.equal(unsupportedGame.response.status, 404);
+    const unsupportedProfile = await api(worker.baseUrl, "/v1/matches/ai", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        gameId: "connect-four",
+        profileId: "unregistered-profile",
+        seriesTarget: 1,
+        displayName: "Test Player",
+      }),
+    });
+    assert.equal(unsupportedProfile.response.status, 400);
+    const created = await api(worker.baseUrl, "/v1/matches/ai", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        gameId: "connect-four",
+        profileId: "standard",
+        seriesTarget: 1,
+        displayName: "Test Player",
+      }),
+    });
+    assert.equal(created.response.status, 201);
+    assert.equal(created.body.seat, "second");
 
-  const client = socketClient(worker.baseUrl, created.body.matchId, created.body.seatToken);
-  clients.push(client);
-  await client.openAndAuthenticate();
-  const activeEvent = await client.waitFor((payload) => payload.type === "match" && payload.match.status === "active" && payload.match.state !== null);
-  assert.equal("aiSocialEvent" in activeEvent, false);
-  let active = activeEvent.match;
-  if (active.awaitingTurnReceipt?.seat === "second") {
-    client.send({ type: "turn-received", revision: active.revision });
-    active = (await client.waitFor((payload) => payload.type === "match" && payload.match.status === "active" && payload.match.turnDeadline !== null)).match;
-  }
-  assert.ok(active.state.moves.length === 0 || active.state.moves.length === 1);
-  assert.equal(active.state.nextPlayer, "second");
+    const client = socketClient(worker.baseUrl, created.body.matchId, created.body.seatToken);
+    clients.push(client);
+    await client.openAndAuthenticate();
+    const activeEvent = await client.waitFor(
+      (payload) =>
+        payload.type === "match" &&
+        payload.match.status === "active" &&
+        payload.match.state !== null,
+    );
+    assert.equal("aiSocialEvent" in activeEvent, false);
+    let active = activeEvent.match;
+    if (active.awaitingTurnReceipt?.seat === "second") {
+      client.send({ type: "turn-received", revision: active.revision });
+      active = (
+        await client.waitFor(
+          (payload) =>
+            payload.type === "match" &&
+            payload.match.status === "active" &&
+            payload.match.turnDeadline !== null,
+        )
+      ).match;
+    }
+    assert.ok(active.state.moves.length === 0 || active.state.moves.length === 1);
+    assert.equal(active.state.nextPlayer, "second");
 
-  const accepted = client.waitFor((payload) => payload.acceptedActionId === "human-first-move");
-  client.send({
-    protocolVersion: 1, type: "submit-action", gameId: "connect-four", rulesVersion: RULES_VERSION,
-    matchId: created.body.matchId, actionId: "human-first-move", expectedRevision: active.revision,
-    action: { type: "drop-token", column: 3 },
-  });
-  const response = await accepted;
-  assert.equal("aiSocialEvent" in response, false);
-  assert.equal(response.match.status, "active");
-  assert.equal(response.match.state.moves.length, active.state.moves.length + 2);
-  assert.equal(response.match.state.nextPlayer, "second");
-  assert.equal(response.match.seatKinds[0], "ai");
-  assert.equal(response.match.seatKinds[1], "human");
+    const accepted = client.waitFor((payload) => payload.acceptedActionId === "human-first-move");
+    client.send({
+      protocolVersion: 1,
+      type: "submit-action",
+      gameId: "connect-four",
+      rulesVersion: RULES_VERSION,
+      matchId: created.body.matchId,
+      actionId: "human-first-move",
+      expectedRevision: active.revision,
+      action: { type: "drop-token", column: 3 },
+    });
+    const response = await accepted;
+    assert.equal("aiSocialEvent" in response, false);
+    assert.equal(response.match.status, "active");
+    assert.equal(response.match.state.moves.length, active.state.moves.length + 2);
+    assert.equal(response.match.state.nextPlayer, "second");
+    assert.equal(response.match.seatKinds[0], "ai");
+    assert.equal(response.match.seatKinds[1], "human");
 
-  const reaction = client.waitFor((payload) => payload.type === "reaction" && payload.seat === "second");
-  client.send({ type: "reaction", reactionId: "clap" });
-  assert.equal((await reaction).reactionId, "clap");
+    const reaction = client.waitFor(
+      (payload) => payload.type === "reaction" && payload.seat === "second",
+    );
+    client.send({ type: "reaction", reactionId: "clap" });
+    assert.equal((await reaction).reactionId, "clap");
 
-  await delay(850);
-  const quickMessage = client.waitFor((payload) => payload.type === "quick-message" && payload.seat === "second");
-  client.send({ type: "quick-message", message: "Nice move!" });
-  assert.equal((await quickMessage).message, "Nice move!");
-});
+    await delay(850);
+    const quickMessage = client.waitFor(
+      (payload) => payload.type === "quick-message" && payload.seat === "second",
+    );
+    client.send({ type: "quick-message", message: "Nice move!" });
+    assert.equal((await quickMessage).message, "Nice move!");
+  },
+);
 
-test("Reversi is registered end to end and its server AI returns a legal reply", { timeout: 30_000 }, async (t) => {
-  const port = await unusedPort();
-  const persistencePath = await mkdtemp(path.join(os.tmpdir(), "portfolio-games-reversi-"));
-  let worker;
-  const clients = [];
-  t.after(async () => {
-    clients.forEach((client) => client.close());
-    if (worker) await stopWorker(worker.process);
-    await rm(persistencePath, { recursive: true, force: true });
-  });
+test(
+  "Reversi is registered end to end and its server AI returns a legal reply",
+  { timeout: 30_000 },
+  async (t) => {
+    const port = await unusedPort();
+    const persistencePath = await mkdtemp(path.join(os.tmpdir(), "portfolio-games-reversi-"));
+    let worker;
+    const clients = [];
+    t.after(async () => {
+      clients.forEach((client) => client.close());
+      if (worker) await stopWorker(worker.process);
+      await rm(persistencePath, { recursive: true, force: true });
+    });
 
-  worker = await startWorker(port, persistencePath);
-  const created = await api(worker.baseUrl, "/v1/matches/ai", {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ gameId: "reversi", rulesVersion: REVERSI_RULES_VERSION, profileId: "expert", seriesTarget: 1, displayName: "Test Player" }),
-  });
-  assert.equal(created.response.status, 201);
-  const client = socketClient(worker.baseUrl, created.body.matchId, created.body.seatToken);
-  clients.push(client);
-  await client.openAndAuthenticate();
-  const activeEvent = await client.waitFor((payload) => payload.type === "match" && payload.match.status === "active" && payload.match.state !== null);
-  let active = activeEvent.match;
-  if (active.awaitingTurnReceipt?.seat === "second") {
-    client.send({ type: "turn-received", revision: active.revision });
-    active = (await client.waitFor((payload) => payload.type === "match" && payload.match.status === "active" && payload.match.turnDeadline !== null)).match;
-  }
-  assert.equal(active.state.nextPlayer, "second");
-  const firstAction = legalReversiMoves(active.state, "second")[0];
-  assert.ok(firstAction);
-  const accepted = client.waitFor((payload) => payload.acceptedActionId === "reversi-human-first-move");
-  client.send({
-    protocolVersion: 1, type: "submit-action", gameId: "reversi", rulesVersion: REVERSI_RULES_VERSION,
-    matchId: created.body.matchId, actionId: "reversi-human-first-move", expectedRevision: active.revision,
-    action: firstAction,
-  });
-  const response = await accepted;
-  assert.equal(response.match.status, "active");
-  assert.equal(response.match.state.moves.length, active.state.moves.length + 2);
-  assert.equal(response.match.state.nextPlayer, "second");
-  assert.equal(response.match.state.moves.at(-1).seat, "first");
-});
+    worker = await startWorker(port, persistencePath);
+    const created = await api(worker.baseUrl, "/v1/matches/ai", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        gameId: "reversi",
+        rulesVersion: REVERSI_RULES_VERSION,
+        profileId: "expert",
+        seriesTarget: 1,
+        displayName: "Test Player",
+      }),
+    });
+    assert.equal(created.response.status, 201);
+    const client = socketClient(worker.baseUrl, created.body.matchId, created.body.seatToken);
+    clients.push(client);
+    await client.openAndAuthenticate();
+    const activeEvent = await client.waitFor(
+      (payload) =>
+        payload.type === "match" &&
+        payload.match.status === "active" &&
+        payload.match.state !== null,
+    );
+    let active = activeEvent.match;
+    if (active.awaitingTurnReceipt?.seat === "second") {
+      client.send({ type: "turn-received", revision: active.revision });
+      active = (
+        await client.waitFor(
+          (payload) =>
+            payload.type === "match" &&
+            payload.match.status === "active" &&
+            payload.match.turnDeadline !== null,
+        )
+      ).match;
+    }
+    assert.equal(active.state.nextPlayer, "second");
+    const firstAction = legalReversiMoves(active.state, "second")[0];
+    assert.ok(firstAction);
+    const accepted = client.waitFor(
+      (payload) => payload.acceptedActionId === "reversi-human-first-move",
+    );
+    client.send({
+      protocolVersion: 1,
+      type: "submit-action",
+      gameId: "reversi",
+      rulesVersion: REVERSI_RULES_VERSION,
+      matchId: created.body.matchId,
+      actionId: "reversi-human-first-move",
+      expectedRevision: active.revision,
+      action: firstAction,
+    });
+    const response = await accepted;
+    assert.equal(response.match.status, "active");
+    assert.equal(response.match.state.moves.length, active.state.moves.length + 2);
+    assert.equal(response.match.state.nextPlayer, "second");
+    assert.equal(response.match.state.moves.at(-1).seat, "first");
+  },
+);
 
-test("two Reversi players synchronize legal moves through the authoritative room", { timeout: 30_000 }, async (t) => {
-  const port = await unusedPort();
-  const persistencePath = await mkdtemp(path.join(os.tmpdir(), "portfolio-games-reversi-human-match-"));
-  let worker;
-  const clients = [];
-  t.after(async () => {
-    clients.forEach((client) => client.close());
-    if (worker) await stopWorker(worker.process);
-    await rm(persistencePath, { recursive: true, force: true });
-  });
+test(
+  "two Reversi players synchronize legal moves through the authoritative room",
+  { timeout: 30_000 },
+  async (t) => {
+    const port = await unusedPort();
+    const persistencePath = await mkdtemp(
+      path.join(os.tmpdir(), "portfolio-games-reversi-human-match-"),
+    );
+    let worker;
+    const clients = [];
+    t.after(async () => {
+      clients.forEach((client) => client.close());
+      if (worker) await stopWorker(worker.process);
+      await rm(persistencePath, { recursive: true, force: true });
+    });
 
-  worker = await startWorker(port, persistencePath);
-  const created = await api(worker.baseUrl, "/v1/matches", {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ gameId: "reversi", rulesVersion: REVERSI_RULES_VERSION, visibility: "public", seriesTarget: 1, displayName: "First Player" }),
-  });
-  assert.equal(created.response.status, 201);
-  const joined = await api(worker.baseUrl, `/v1/matches/${created.body.matchId}/join`, {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ rulesVersion: REVERSI_RULES_VERSION, supportedGames: { reversi: [REVERSI_RULES_VERSION] }, displayName: "Second Player" }),
-  });
-  assert.equal(joined.response.status, 200, JSON.stringify(joined.body));
+    worker = await startWorker(port, persistencePath);
+    const created = await api(worker.baseUrl, "/v1/matches", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        gameId: "reversi",
+        rulesVersion: REVERSI_RULES_VERSION,
+        visibility: "public",
+        seriesTarget: 1,
+        displayName: "First Player",
+      }),
+    });
+    assert.equal(created.response.status, 201);
+    const joined = await api(worker.baseUrl, `/v1/matches/${created.body.matchId}/join`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        rulesVersion: REVERSI_RULES_VERSION,
+        supportedGames: { reversi: [REVERSI_RULES_VERSION] },
+        displayName: "Second Player",
+      }),
+    });
+    assert.equal(joined.response.status, 200, JSON.stringify(joined.body));
 
-  let first = socketClient(worker.baseUrl, created.body.matchId, created.body.seatToken);
-  const second = socketClient(worker.baseUrl, created.body.matchId, joined.body.seatToken);
-  clients.push(first, second);
-  await Promise.all([first.openAndAuthenticate(), second.openAndAuthenticate()]);
+    let first = socketClient(worker.baseUrl, created.body.matchId, created.body.seatToken);
+    const second = socketClient(worker.baseUrl, created.body.matchId, joined.body.seatToken);
+    clients.push(first, second);
+    await Promise.all([first.openAndAuthenticate(), second.openAndAuthenticate()]);
 
-  const active = await first.waitFor((payload) => payload.type === "match" && payload.match.status === "active" && payload.match.state !== null);
-  let match = active.match;
-  for (let actionNumber = 0; actionNumber < 8 && match.state.outcome === null; actionNumber += 1) {
-    if (match.awaitingTurnReceipt) {
-      const revision = match.revision;
-      const readyEvents = Promise.all(clients.map((client) => client.waitFor((payload) =>
-        payload.type === "match" && payload.match.revision > revision && payload.match.turnDeadline !== null && payload.match.awaitingTurnReceipt === null,
-      )));
-      const current = match.awaitingTurnReceipt.seat === "first" ? first : second;
-      current.send({ type: "turn-received", revision });
-      const ready = await readyEvents;
-      match = ready.reduce((latest, event) => event.match.revision > latest.revision ? event.match : latest, ready[0].match);
+    const active = await first.waitFor(
+      (payload) =>
+        payload.type === "match" &&
+        payload.match.status === "active" &&
+        payload.match.state !== null,
+    );
+    let match = active.match;
+    for (
+      let actionNumber = 0;
+      actionNumber < 8 && match.state.outcome === null;
+      actionNumber += 1
+    ) {
+      if (match.awaitingTurnReceipt) {
+        const revision = match.revision;
+        const readyEvents = Promise.all(
+          clients.map((client) =>
+            client.waitFor(
+              (payload) =>
+                payload.type === "match" &&
+                payload.match.revision > revision &&
+                payload.match.turnDeadline !== null &&
+                payload.match.awaitingTurnReceipt === null,
+            ),
+          ),
+        );
+        const current = match.awaitingTurnReceipt.seat === "first" ? first : second;
+        current.send({ type: "turn-received", revision });
+        const ready = await readyEvents;
+        match = ready.reduce(
+          (latest, event) => (event.match.revision > latest.revision ? event.match : latest),
+          ready[0].match,
+        );
+      }
+
+      assert.equal(match.status, "active");
+      const seat = match.state.nextPlayer;
+      assert.ok(seat === "first" || seat === "second");
+      const player = seat === "first" ? first : second;
+      const legal = legalReversiMoves(match.state, seat);
+      assert.ok(
+        legal.length > 0,
+        "the authoritative state must not leave an active player without a legal move",
+      );
+      const index = (Math.imul(1 + match.state.moves.length, 2654435761) >>> 0) % legal.length;
+      const action = legal[index];
+      const actionId = `reversi-human-${actionNumber}`;
+      const accepted = player.waitFor((payload) => payload.acceptedActionId === actionId);
+      const opponent = player === first ? second : first;
+      const synchronized = opponent.waitFor(
+        (payload) => payload.type === "match" && payload.match.revision > match.revision,
+      );
+      player.send({
+        protocolVersion: 1,
+        type: "submit-action",
+        gameId: "reversi",
+        rulesVersion: REVERSI_RULES_VERSION,
+        matchId: created.body.matchId,
+        actionId,
+        expectedRevision: match.revision,
+        action,
+      });
+      const [acceptedEvent, synchronizedEvent] = await Promise.all([accepted, synchronized]);
+      match = acceptedEvent.match;
+      assert.equal(synchronizedEvent.match.revision, match.revision);
+      assert.deepEqual(synchronizedEvent.match.state, match.state);
     }
 
     assert.equal(match.status, "active");
-    const seat = match.state.nextPlayer;
-    assert.ok(seat === "first" || seat === "second");
-    const player = seat === "first" ? first : second;
-    const legal = legalReversiMoves(match.state, seat);
-    assert.ok(legal.length > 0, "the authoritative state must not leave an active player without a legal move");
-    const index = (Math.imul(1 + match.state.moves.length, 2654435761) >>> 0) % legal.length;
-    const action = legal[index];
-    const actionId = `reversi-human-${actionNumber}`;
-    const accepted = player.waitFor((payload) => payload.acceptedActionId === actionId);
-    const opponent = player === first ? second : first;
-    const synchronized = opponent.waitFor((payload) => payload.type === "match" && payload.match.revision > match.revision);
-    player.send({
-      protocolVersion: 1, type: "submit-action", gameId: "reversi", rulesVersion: REVERSI_RULES_VERSION,
-      matchId: created.body.matchId, actionId, expectedRevision: match.revision, action,
+    assert.equal(match.state.moves.length, 8);
+    assert.equal(match.state.skippedSeat, null);
+
+    const disconnected = second.waitFor(
+      (payload) => payload.type === "match" && payload.match.connectedSeats?.[0] === false,
+    );
+    first.close();
+    await disconnected;
+    const replacement = socketClient(worker.baseUrl, created.body.matchId, created.body.seatToken);
+    clients.push(replacement);
+    const restored = await replacement.openAndAuthenticate();
+    first = replacement;
+    match = restored.match;
+    assert.equal(match.connectedSeats?.every(Boolean), true);
+    assert.equal(
+      match.state.moves.length,
+      8,
+      "reconnect should restore the authoritative Reversi board",
+    );
+
+    const completed = second.waitFor(
+      (payload) => payload.type === "match" && payload.match.status === "completed",
+    );
+    first.send({ type: "resign" });
+    match = (await completed).match;
+    assert.equal(match.seriesWinner, "second");
+    assert.deepEqual(match.wins, { first: 0, second: 1 });
+
+    const firstCountdown = first.waitFor(
+      (payload) =>
+        payload.type === "match" &&
+        payload.match.status === "countdown" &&
+        payload.match.rematchCountdown,
+    );
+    const secondCountdown = second.waitFor(
+      (payload) =>
+        payload.type === "match" &&
+        payload.match.status === "countdown" &&
+        payload.match.rematchCountdown,
+    );
+    first.send({ type: "rematch" });
+    second.send({ type: "rematch" });
+    const [firstStarting, secondStarting] = await Promise.all([firstCountdown, secondCountdown]);
+    assert.equal(firstStarting.match.revision, secondStarting.match.revision);
+
+    const nextFirst = first.waitFor(
+      (payload) =>
+        payload.type === "match" &&
+        payload.match.revision > firstStarting.match.revision &&
+        payload.match.status === "active" &&
+        payload.match.gameNumber === 1 &&
+        payload.match.state?.moves.length === 0,
+      15_000,
+    );
+    const nextSecond = second.waitFor(
+      (payload) =>
+        payload.type === "match" &&
+        payload.match.revision > secondStarting.match.revision &&
+        payload.match.status === "active" &&
+        payload.match.gameNumber === 1 &&
+        payload.match.state?.moves.length === 0,
+      15_000,
+    );
+    const [nextFirstEvent, nextSecondEvent] = await Promise.all([nextFirst, nextSecond]);
+    assert.equal(nextFirstEvent.match.state.board.flat().filter(Boolean).length, 4);
+    assert.deepEqual(nextFirstEvent.match.wins, { first: 0, second: 0 });
+    assert.equal(nextSecondEvent.match.revision, nextFirstEvent.match.revision);
+  },
+);
+
+test(
+  "public quick matches pair compatible humans atomically and keep settings isolated",
+  { timeout: 30_000 },
+  async (t) => {
+    const port = await unusedPort();
+    const persistencePath = await mkdtemp(path.join(os.tmpdir(), "portfolio-games-quick-match-"));
+    let worker;
+    const clients = [];
+    t.after(async () => {
+      clients.forEach((client) => client.close());
+      if (worker) await stopWorker(worker.process);
+      await rm(persistencePath, { recursive: true, force: true });
     });
-    const [acceptedEvent, synchronizedEvent] = await Promise.all([accepted, synchronized]);
-    match = acceptedEvent.match;
-    assert.equal(synchronizedEvent.match.revision, match.revision);
-    assert.deepEqual(synchronizedEvent.match.state, match.state);
-  }
 
-  assert.equal(match.status, "active");
-  assert.equal(match.state.moves.length, 8);
-  assert.equal(match.state.skippedSeat, null);
+    worker = await startWorker(port, persistencePath);
+    const request = (displayName, seriesTarget = 2, rulesVersion = RULES_VERSION) =>
+      api(worker.baseUrl, "/v1/matches/quick", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ gameId: "connect-four", rulesVersion, seriesTarget, displayName }),
+      });
+    const [first, second] = await Promise.all([request("First Player"), request("Second Player")]);
+    assert.ok([first.response.status, second.response.status].includes(201));
+    assert.ok([first.response.status, second.response.status].includes(200));
+    assert.equal(first.body.matchId, second.body.matchId);
+    assert.deepEqual(new Set([first.body.seat, second.body.seat]), new Set(["first", "second"]));
+    assert.equal([first.body, second.body].filter((body) => body.matched === false).length, 1);
+    assert.equal([first.body, second.body].filter((body) => body.matched === true).length, 1);
 
-  const disconnected = second.waitFor((payload) => payload.type === "match" && payload.match.connectedSeats?.[0] === false);
-  first.close();
-  await disconnected;
-  const replacement = socketClient(worker.baseUrl, created.body.matchId, created.body.seatToken);
-  clients.push(replacement);
-  const restored = await replacement.openAndAuthenticate();
-  first = replacement;
-  match = restored.match;
-  assert.equal(match.connectedSeats?.every(Boolean), true);
-  assert.equal(match.state.moves.length, 8, "reconnect should restore the authoritative Reversi board");
+    const seats = [first.body, second.body];
+    for (const seat of seats) {
+      const client = socketClient(worker.baseUrl, seat.matchId, seat.seatToken);
+      clients.push(client);
+      await client.openAndAuthenticate();
+    }
+    const active = await clients[1].waitFor(
+      (payload) => payload.type === "match" && payload.match.status === "active",
+    );
+    assert.deepEqual(active.match.playerNames.sort(), ["First Player", "Second Player"].sort());
+    assert.deepEqual(active.match.seatKinds, ["human", "human"]);
 
-  const completed = second.waitFor((payload) => payload.type === "match" && payload.match.status === "completed");
-  first.send({ type: "resign" });
-  match = (await completed).match;
-  assert.equal(match.seriesWinner, "second");
-  assert.deepEqual(match.wins, { first: 0, second: 1 });
+    const differentSeries = await request("Third Player", 1);
+    assert.equal(differentSeries.response.status, 201);
+    assert.notEqual(differentSeries.body.matchId, first.body.matchId);
+    const cancelled = await api(
+      worker.baseUrl,
+      `/v1/matches/${differentSeries.body.matchId}/cancel`,
+      {
+        method: "POST",
+        headers: { Authorization: `Bearer ${differentSeries.body.seatToken}` },
+      },
+    );
+    assert.equal(cancelled.response.status, 200);
+    assert.equal(cancelled.body.match.status, "cancelled");
 
-  const firstCountdown = first.waitFor((payload) => payload.type === "match" && payload.match.status === "countdown" && payload.match.rematchCountdown);
-  const secondCountdown = second.waitFor((payload) => payload.type === "match" && payload.match.status === "countdown" && payload.match.rematchCountdown);
-  first.send({ type: "rematch" });
-  second.send({ type: "rematch" });
-  const [firstStarting, secondStarting] = await Promise.all([firstCountdown, secondCountdown]);
-  assert.equal(firstStarting.match.revision, secondStarting.match.revision);
+    const anyCandidate = await request("Any Match Host", 1);
+    assert.equal(anyCandidate.response.status, 201);
+    const anyJoiner = await api(worker.baseUrl, "/v1/matches/quick", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        gameId: "connect-four",
+        rulesVersion: RULES_VERSION,
+        seriesTarget: 3,
+        matchAnySeries: true,
+        displayName: "Any Match Joiner",
+      }),
+    });
+    assert.equal(
+      anyJoiner.response.status,
+      200,
+      JSON.stringify({ candidate: anyCandidate.body, joiner: anyJoiner.body }),
+    );
+    assert.equal(anyJoiner.body.matchId, anyCandidate.body.matchId);
+    assert.equal(anyJoiner.body.seriesTarget, 1);
+    assert.equal(anyJoiner.body.matched, true);
+  },
+);
 
-  const nextFirst = first.waitFor((payload) => payload.type === "match" && payload.match.revision > firstStarting.match.revision && payload.match.status === "active" && payload.match.gameNumber === 1 && payload.match.state?.moves.length === 0, 15_000);
-  const nextSecond = second.waitFor((payload) => payload.type === "match" && payload.match.revision > secondStarting.match.revision && payload.match.status === "active" && payload.match.gameNumber === 1 && payload.match.state?.moves.length === 0, 15_000);
-  const [nextFirstEvent, nextSecondEvent] = await Promise.all([nextFirst, nextSecond]);
-  assert.equal(nextFirstEvent.match.state.board.flat().filter(Boolean).length, 4);
-  assert.deepEqual(nextFirstEvent.match.wins, { first: 0, second: 0 });
-  assert.equal(nextSecondEvent.match.revision, nextFirstEvent.match.revision);
-});
+test(
+  "an unmatched public room schedules its fallback between 8 and 60 seconds",
+  { timeout: 20_000 },
+  async (t) => {
+    const port = await unusedPort();
+    const persistencePath = await mkdtemp(
+      path.join(os.tmpdir(), "portfolio-games-quick-fallback-"),
+    );
+    let worker;
+    const clients = [];
+    t.after(async () => {
+      clients.forEach((client) => client.close());
+      if (worker) await stopWorker(worker.process);
+      await rm(persistencePath, { recursive: true, force: true });
+    });
 
-test("public quick matches pair compatible humans atomically and keep settings isolated", { timeout: 30_000 }, async (t) => {
-  const port = await unusedPort();
-  const persistencePath = await mkdtemp(path.join(os.tmpdir(), "portfolio-games-quick-match-"));
-  let worker;
-  const clients = [];
-  t.after(async () => {
-    clients.forEach((client) => client.close());
-    if (worker) await stopWorker(worker.process);
-    await rm(persistencePath, { recursive: true, force: true });
-  });
-
-  worker = await startWorker(port, persistencePath);
-  const request = (displayName, seriesTarget = 2, rulesVersion = RULES_VERSION) => api(worker.baseUrl, "/v1/matches/quick", {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ gameId: "connect-four", rulesVersion, seriesTarget, displayName }),
-  });
-  const [first, second] = await Promise.all([request("First Player"), request("Second Player")]);
-  assert.ok([first.response.status, second.response.status].includes(201));
-  assert.ok([first.response.status, second.response.status].includes(200));
-  assert.equal(first.body.matchId, second.body.matchId);
-  assert.deepEqual(new Set([first.body.seat, second.body.seat]), new Set(["first", "second"]));
-  assert.equal([first.body, second.body].filter((body) => body.matched === false).length, 1);
-  assert.equal([first.body, second.body].filter((body) => body.matched === true).length, 1);
-
-  const seats = [first.body, second.body];
-  for (const seat of seats) {
-    const client = socketClient(worker.baseUrl, seat.matchId, seat.seatToken);
+    worker = await startWorker(port, persistencePath);
+    const created = await api(worker.baseUrl, "/v1/matches/quick", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        gameId: "connect-four",
+        rulesVersion: RULES_VERSION,
+        seriesTarget: 1,
+        displayName: "Waiting Player",
+      }),
+    });
+    assert.equal(created.response.status, 201);
+    assert.equal(created.body.seat, "first");
+    assert.ok(Number.isFinite(created.body.aiFallbackAt));
+    assert.ok(created.body.aiFallbackAt >= created.body.expiresAt - 5 * 60_000 + 8_000);
+    assert.ok(created.body.aiFallbackAt <= created.body.expiresAt - 5 * 60_000 + 60_000);
+    const client = socketClient(worker.baseUrl, created.body.matchId, created.body.seatToken);
     clients.push(client);
     await client.openAndAuthenticate();
-  }
-  const active = await clients[1].waitFor((payload) => payload.type === "match" && payload.match.status === "active");
-  assert.deepEqual(active.match.playerNames.sort(), ["First Player", "Second Player"].sort());
-  assert.deepEqual(active.match.seatKinds, ["human", "human"]);
+    const waiting = await client.waitFor(
+      (payload) => payload.type === "match" && payload.match.status === "waiting",
+    );
+    assert.equal(waiting.match.seatKinds[1], "human");
+    assert.equal(waiting.match.aiFallbackAt, created.body.aiFallbackAt);
+  },
+);
 
-  const differentSeries = await request("Third Player", 1);
-  assert.equal(differentSeries.response.status, 201);
-  assert.notEqual(differentSeries.body.matchId, first.body.matchId);
-  const cancelled = await api(worker.baseUrl, `/v1/matches/${differentSeries.body.matchId}/cancel`, {
-    method: "POST", headers: { Authorization: `Bearer ${differentSeries.body.seatToken}` },
-  });
-  assert.equal(cancelled.response.status, 200);
-  assert.equal(cancelled.body.match.status, "cancelled");
+test(
+  "AI opponent accepts a rematch and starts the next game without another player seat",
+  { timeout: 30_000 },
+  async (t) => {
+    const port = await unusedPort();
+    const persistencePath = await mkdtemp(path.join(os.tmpdir(), "portfolio-games-ai-rematch-"));
+    let worker;
+    const clients = [];
+    t.after(async () => {
+      clients.forEach((client) => client.close());
+      if (worker) await stopWorker(worker.process);
+      await rm(persistencePath, { recursive: true, force: true });
+    });
 
-  const anyCandidate = await request("Any Match Host", 1);
-  assert.equal(anyCandidate.response.status, 201);
-  const anyJoiner = await api(worker.baseUrl, "/v1/matches/quick", {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ gameId: "connect-four", rulesVersion: RULES_VERSION, seriesTarget: 3, matchAnySeries: true, displayName: "Any Match Joiner" }),
-  });
-  assert.equal(anyJoiner.response.status, 200, JSON.stringify({ candidate: anyCandidate.body, joiner: anyJoiner.body }));
-  assert.equal(anyJoiner.body.matchId, anyCandidate.body.matchId);
-  assert.equal(anyJoiner.body.seriesTarget, 1);
-  assert.equal(anyJoiner.body.matched, true);
-});
+    worker = await startWorker(port, persistencePath);
+    const created = await api(worker.baseUrl, "/v1/matches/ai", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        gameId: "connect-four",
+        profileId: "standard",
+        seriesTarget: 1,
+        displayName: "Test Player",
+      }),
+    });
+    assert.equal(created.response.status, 201);
 
-test("an unmatched public room schedules its fallback between 8 and 60 seconds", { timeout: 20_000 }, async (t) => {
-  const port = await unusedPort();
-  const persistencePath = await mkdtemp(path.join(os.tmpdir(), "portfolio-games-quick-fallback-"));
-  let worker;
-  const clients = [];
-  t.after(async () => {
-    clients.forEach((client) => client.close());
-    if (worker) await stopWorker(worker.process);
-    await rm(persistencePath, { recursive: true, force: true });
-  });
+    const client = socketClient(worker.baseUrl, created.body.matchId, created.body.seatToken);
+    clients.push(client);
+    await client.openAndAuthenticate();
+    await client.waitFor(
+      (payload) =>
+        payload.type === "match" &&
+        payload.match.status === "active" &&
+        payload.match.state !== null,
+    );
 
-  worker = await startWorker(port, persistencePath);
-  const created = await api(worker.baseUrl, "/v1/matches/quick", {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ gameId: "connect-four", rulesVersion: RULES_VERSION, seriesTarget: 1, displayName: "Waiting Player" }),
-  });
-  assert.equal(created.response.status, 201);
-  assert.equal(created.body.seat, "first");
-  assert.ok(Number.isFinite(created.body.aiFallbackAt));
-  assert.ok(created.body.aiFallbackAt >= created.body.expiresAt - 5 * 60_000 + 8_000);
-  assert.ok(created.body.aiFallbackAt <= created.body.expiresAt - 5 * 60_000 + 60_000);
-  const client = socketClient(worker.baseUrl, created.body.matchId, created.body.seatToken);
-  clients.push(client);
-  await client.openAndAuthenticate();
-  const waiting = await client.waitFor((payload) => payload.type === "match" && payload.match.status === "waiting");
-  assert.equal(waiting.match.seatKinds[1], "human");
-  assert.equal(waiting.match.aiFallbackAt, created.body.aiFallbackAt);
-});
-
-test("AI opponent accepts a rematch and starts the next game without another player seat", { timeout: 30_000 }, async (t) => {
-  const port = await unusedPort();
-  const persistencePath = await mkdtemp(path.join(os.tmpdir(), "portfolio-games-ai-rematch-"));
-  let worker;
-  const clients = [];
-  t.after(async () => {
-    clients.forEach((client) => client.close());
-    if (worker) await stopWorker(worker.process);
-    await rm(persistencePath, { recursive: true, force: true });
-  });
-
-  worker = await startWorker(port, persistencePath);
-  const created = await api(worker.baseUrl, "/v1/matches/ai", {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ gameId: "connect-four", profileId: "standard", seriesTarget: 1, displayName: "Test Player" }),
-  });
-  assert.equal(created.response.status, 201);
-
-  const client = socketClient(worker.baseUrl, created.body.matchId, created.body.seatToken);
-  clients.push(client);
-  await client.openAndAuthenticate();
-  await client.waitFor((payload) => payload.type === "match" && payload.match.status === "active" && payload.match.state !== null);
-
-  const completed = client.waitFor((payload) => payload.type === "match" && payload.match.status === "completed");
-  client.send({ type: "resign" });
-  const result = await completed;
-  assert.equal(result.match.seriesWinner, "first");
-
-  const countdown = client.waitFor((payload) => payload.type === "match" && payload.match.status === "countdown" && payload.match.rematchCountdown === true);
-  client.send({ type: "rematch" });
-  await countdown;
-  const restarted = await client.waitFor((payload) => payload.type === "match" && payload.match.status === "active" &&
-    payload.match.gameNumber === 1 && payload.match.revision > result.match.revision);
-  assert.ok(restarted.match.state.moves.length === 0 || restarted.match.state.moves.length === 1);
-  assert.equal(restarted.match.state.nextPlayer, "second");
-});
-
-test("AI opponents stop accepting rematches after their persisted one-to-three rematch allowance", { timeout: 60_000 }, async (t) => {
-  const port = await unusedPort();
-  const persistencePath = await mkdtemp(path.join(os.tmpdir(), "portfolio-games-ai-rematch-limit-"));
-  let worker;
-  const clients = [];
-  t.after(async () => {
-    clients.forEach((client) => client.close());
-    if (worker) await stopWorker(worker.process);
-    await rm(persistencePath, { recursive: true, force: true });
-  });
-
-  worker = await startWorker(port, persistencePath);
-  const created = await api(worker.baseUrl, "/v1/matches/ai", {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ gameId: "connect-four", profileId: "expert", seriesTarget: 1, displayName: "Test Player" }),
-  });
-  assert.equal(created.response.status, 201);
-  const client = socketClient(worker.baseUrl, created.body.matchId, created.body.seatToken);
-  clients.push(client);
-  await client.openAndAuthenticate();
-  await client.waitFor((payload) => payload.type === "match" && payload.match.status === "active");
-
-  let completed;
-  const resign = async () => {
-    const next = client.waitFor((payload) => payload.type === "match" && payload.match.status === "completed");
+    const completed = client.waitFor(
+      (payload) => payload.type === "match" && payload.match.status === "completed",
+    );
     client.send({ type: "resign" });
-    completed = await next;
-  };
-  await resign();
-  let accepted = 0;
-  for (let attempt = 0; attempt < 4; attempt += 1) {
-    const result = client.waitFor((payload) => payload.type === "match" && payload.match.revision > completed.match.revision &&
-      (payload.match.status === "countdown" || (payload.match.status === "completed" && payload.match.closedSeats[0] === true)));
+    const result = await completed;
+    assert.equal(result.match.seriesWinner, "first");
+
+    const countdown = client.waitFor(
+      (payload) =>
+        payload.type === "match" &&
+        payload.match.status === "countdown" &&
+        payload.match.rematchCountdown === true,
+    );
     client.send({ type: "rematch" });
-    const response = await result;
-    if (response.match.status === "completed") {
-      completed = response;
-      break;
-    }
-    accepted += 1;
-    await client.waitFor((payload) => payload.type === "match" && payload.match.status === "active" && payload.match.gameNumber === 1);
+    await countdown;
+    const restarted = await client.waitFor(
+      (payload) =>
+        payload.type === "match" &&
+        payload.match.status === "active" &&
+        payload.match.gameNumber === 1 &&
+        payload.match.revision > result.match.revision,
+    );
+    assert.ok(restarted.match.state.moves.length === 0 || restarted.match.state.moves.length === 1);
+    assert.equal(restarted.match.state.nextPlayer, "second");
+  },
+);
+
+test(
+  "AI opponents stop accepting rematches after their persisted one-to-three rematch allowance",
+  { timeout: 60_000 },
+  async (t) => {
+    const port = await unusedPort();
+    const persistencePath = await mkdtemp(
+      path.join(os.tmpdir(), "portfolio-games-ai-rematch-limit-"),
+    );
+    let worker;
+    const clients = [];
+    t.after(async () => {
+      clients.forEach((client) => client.close());
+      if (worker) await stopWorker(worker.process);
+      await rm(persistencePath, { recursive: true, force: true });
+    });
+
+    worker = await startWorker(port, persistencePath);
+    const created = await api(worker.baseUrl, "/v1/matches/ai", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        gameId: "connect-four",
+        profileId: "expert",
+        seriesTarget: 1,
+        displayName: "Test Player",
+      }),
+    });
+    assert.equal(created.response.status, 201);
+    const client = socketClient(worker.baseUrl, created.body.matchId, created.body.seatToken);
+    clients.push(client);
+    await client.openAndAuthenticate();
+    await client.waitFor(
+      (payload) => payload.type === "match" && payload.match.status === "active",
+    );
+
+    let completed;
+    const resign = async () => {
+      const next = client.waitFor(
+        (payload) => payload.type === "match" && payload.match.status === "completed",
+      );
+      client.send({ type: "resign" });
+      completed = await next;
+    };
     await resign();
-    if (completed.match.closedSeats[0]) break;
-  }
-  assert.ok(accepted >= 1 && accepted <= 3, `expected one to three accepted rematches, got ${accepted}`);
-  assert.equal(completed.match.closedSeats[0], true, "AI seat should be closed once its allowance is used");
-});
+    let accepted = 0;
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      const result = client.waitFor(
+        (payload) =>
+          payload.type === "match" &&
+          payload.match.revision > completed.match.revision &&
+          (payload.match.status === "countdown" ||
+            (payload.match.status === "completed" && payload.match.closedSeats[0] === true)),
+      );
+      client.send({ type: "rematch" });
+      const response = await result;
+      if (response.match.status === "completed") {
+        completed = response;
+        break;
+      }
+      accepted += 1;
+      await client.waitFor(
+        (payload) =>
+          payload.type === "match" &&
+          payload.match.status === "active" &&
+          payload.match.gameNumber === 1,
+      );
+      await resign();
+      if (completed.match.closedSeats[0]) break;
+    }
+    assert.ok(
+      accepted >= 1 && accepted <= 3,
+      `expected one to three accepted rematches, got ${accepted}`,
+    );
+    assert.equal(
+      completed.match.closedSeats[0],
+      true,
+      "AI seat should be closed once its allowance is used",
+    );
+  },
+);
 
-test("replacing a live player's socket preserves the seat and allows the current turn", { timeout: 60_000 }, async (t) => {
-  const port = await unusedPort();
-  const persistencePath = await mkdtemp(path.join(os.tmpdir(), "portfolio-games-worker-replace-"));
-  let worker;
-  const clients = [];
-  t.after(async () => {
-    clients.forEach((client) => client.close());
-    if (worker) await stopWorker(worker.process);
-    await rm(persistencePath, { recursive: true, force: true });
-  });
+test(
+  "replacing a live player's socket preserves the seat and allows the current turn",
+  { timeout: 60_000 },
+  async (t) => {
+    const port = await unusedPort();
+    const persistencePath = await mkdtemp(
+      path.join(os.tmpdir(), "portfolio-games-worker-replace-"),
+    );
+    let worker;
+    const clients = [];
+    t.after(async () => {
+      clients.forEach((client) => client.close());
+      if (worker) await stopWorker(worker.process);
+      await rm(persistencePath, { recursive: true, force: true });
+    });
 
-  worker = await startWorker(port, persistencePath);
-  const created = await api(worker.baseUrl, "/v1/matches", {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ gameId: "connect-four", rulesVersion: RULES_VERSION, visibility: "public", seriesTarget: 2 }),
-  });
-  assert.equal(created.response.status, 201);
-  const joined = await api(worker.baseUrl, `/v1/matches/${created.body.matchId}/join`, {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ rulesVersion: RULES_VERSION }),
-  });
-  assert.equal(joined.response.status, 200);
+    worker = await startWorker(port, persistencePath);
+    const created = await api(worker.baseUrl, "/v1/matches", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        gameId: "connect-four",
+        rulesVersion: RULES_VERSION,
+        visibility: "public",
+        seriesTarget: 2,
+      }),
+    });
+    assert.equal(created.response.status, 201);
+    const joined = await api(worker.baseUrl, `/v1/matches/${created.body.matchId}/join`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ rulesVersion: RULES_VERSION }),
+    });
+    assert.equal(joined.response.status, 200);
 
-  const first = socketClient(worker.baseUrl, created.body.matchId, created.body.seatToken);
-  const second = socketClient(worker.baseUrl, created.body.matchId, joined.body.seatToken);
-  clients.push(first, second);
-  await Promise.all([first.openAndAuthenticate(), second.openAndAuthenticate()]);
-  const activePredicate = (payload) => payload.type === "match" && payload.match.status === "active";
-  const [firstActive, secondActive] = await Promise.all([first.waitFor(activePredicate), second.waitFor(activePredicate)]);
-  assert.equal(firstActive.match.revision, secondActive.match.revision);
+    const first = socketClient(worker.baseUrl, created.body.matchId, created.body.seatToken);
+    const second = socketClient(worker.baseUrl, created.body.matchId, joined.body.seatToken);
+    clients.push(first, second);
+    await Promise.all([first.openAndAuthenticate(), second.openAndAuthenticate()]);
+    const activePredicate = (payload) =>
+      payload.type === "match" && payload.match.status === "active";
+    const [firstActive, secondActive] = await Promise.all([
+      first.waitFor(activePredicate),
+      second.waitFor(activePredicate),
+    ]);
+    assert.equal(firstActive.match.revision, secondActive.match.revision);
 
-  const starterSeat = firstActive.match.awaitingTurnReceipt.seat;
-  const starter = starterSeat === "first" ? first : second;
-  const starterReady = Promise.all([
-    first.waitFor((payload) => payload.type === "match" && payload.match.turnDeadline !== null),
-    second.waitFor((payload) => payload.type === "match" && payload.match.turnDeadline !== null),
-  ]);
-  starter.send({ type: "turn-received", revision: firstActive.match.revision });
-  const [readyFromFirst] = await starterReady;
+    const starterSeat = firstActive.match.awaitingTurnReceipt.seat;
+    const starter = starterSeat === "first" ? first : second;
+    const starterReady = Promise.all([
+      first.waitFor((payload) => payload.type === "match" && payload.match.turnDeadline !== null),
+      second.waitFor((payload) => payload.type === "match" && payload.match.turnDeadline !== null),
+    ]);
+    starter.send({ type: "turn-received", revision: firstActive.match.revision });
+    const [readyFromFirst] = await starterReady;
 
-  const oldClient = starter;
-  const seatToken = starterSeat === "first" ? created.body.seatToken : joined.body.seatToken;
-  const replacement = socketClient(worker.baseUrl, created.body.matchId, seatToken);
-  clients.push(replacement);
-  const oldSocketClosed = once(oldClient.socket, "close");
-  const replacementSnapshot = await replacement.openAndAuthenticate();
-  await oldSocketClosed;
+    const oldClient = starter;
+    const seatToken = starterSeat === "first" ? created.body.seatToken : joined.body.seatToken;
+    const replacement = socketClient(worker.baseUrl, created.body.matchId, seatToken);
+    clients.push(replacement);
+    const oldSocketClosed = once(oldClient.socket, "close");
+    const replacementSnapshot = await replacement.openAndAuthenticate();
+    await oldSocketClosed;
 
-  assert.equal(replacementSnapshot.match.status, "active");
-  assert.notEqual(replacementSnapshot.match.turnDeadline, null);
-  const authoritative = await api(worker.baseUrl, `/v1/matches/${created.body.matchId}`, {
-    headers: { Authorization: `Bearer ${seatToken}` },
-  });
-  assert.equal(authoritative.response.status, 200);
-  assert.equal(authoritative.body.connectedSeats[starterSeat === "first" ? 0 : 1], true);
-  assert.equal(authoritative.body.turnDeadline, readyFromFirst.match.turnDeadline);
+    assert.equal(replacementSnapshot.match.status, "active");
+    assert.notEqual(replacementSnapshot.match.turnDeadline, null);
+    const authoritative = await api(worker.baseUrl, `/v1/matches/${created.body.matchId}`, {
+      headers: { Authorization: `Bearer ${seatToken}` },
+    });
+    assert.equal(authoritative.response.status, 200);
+    assert.equal(authoritative.body.connectedSeats[starterSeat === "first" ? 0 : 1], true);
+    assert.equal(authoritative.body.turnDeadline, readyFromFirst.match.turnDeadline);
 
-  const actionId = "replacement-socket-move";
-  const accepted = replacement.waitFor((payload) => payload.acceptedActionId === actionId);
-  replacement.send({
-    protocolVersion: 1, type: "submit-action", gameId: "connect-four", rulesVersion: RULES_VERSION,
-    matchId: created.body.matchId, actionId, expectedRevision: authoritative.body.revision,
-    action: { type: "drop-token", column: 2 },
-  });
-  assert.equal((await accepted).match.state.moves.length, 1);
-});
+    const actionId = "replacement-socket-move";
+    const accepted = replacement.waitFor((payload) => payload.acceptedActionId === actionId);
+    replacement.send({
+      protocolVersion: 1,
+      type: "submit-action",
+      gameId: "connect-four",
+      rulesVersion: RULES_VERSION,
+      matchId: created.body.matchId,
+      actionId,
+      expectedRevision: authoritative.body.revision,
+      action: { type: "drop-token", column: 2 },
+    });
+    assert.equal((await accepted).match.state.moves.length, 1);
+  },
+);
 
-test("Worker runtime synchronizes two clients, deduplicates actions, rejects stale moves, and restores stored state", { timeout: 90_000 }, async (t) => {
-  const port = await unusedPort();
-  const persistencePath = await mkdtemp(path.join(os.tmpdir(), "portfolio-games-worker-"));
-  let worker;
-  const clients = [];
-  t.after(async () => {
-    clients.forEach((client) => client.close());
-    if (worker) await stopWorker(worker.process);
-    await rm(persistencePath, { recursive: true, force: true });
-  });
+test(
+  "Worker runtime synchronizes two clients, deduplicates actions, rejects stale moves, and restores stored state",
+  { timeout: 90_000 },
+  async (t) => {
+    const port = await unusedPort();
+    const persistencePath = await mkdtemp(path.join(os.tmpdir(), "portfolio-games-worker-"));
+    let worker;
+    const clients = [];
+    t.after(async () => {
+      clients.forEach((client) => client.close());
+      if (worker) await stopWorker(worker.process);
+      await rm(persistencePath, { recursive: true, force: true });
+    });
 
-  worker = await startWorker(port, persistencePath);
-  const created = await api(worker.baseUrl, "/v1/matches", {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ gameId: "connect-four", rulesVersion: RULES_VERSION, visibility: "public", seriesTarget: 2 }),
-  });
-  assert.equal(created.response.status, 201);
-  const matchId = created.body.matchId;
-  const waiting = await api(worker.baseUrl, `/v1/matches/${matchId}`, {
-    headers: { Authorization: `Bearer ${created.body.seatToken}` },
-  });
-  assert.equal(waiting.body.status, "waiting");
-  assert.equal(waiting.body.rulesVersion, RULES_VERSION);
-  const stalePreview = await api(worker.baseUrl, `/v1/matches/${matchId}/preview`, {
-    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ rulesVersion: 1 }),
-  });
-  assert.equal(stalePreview.response.status, 426);
-  const currentPreview = await api(worker.baseUrl, `/v1/matches/${matchId}/preview`, {
-    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ rulesVersion: RULES_VERSION }),
-  });
-  assert.equal(currentPreview.response.status, 200);
+    worker = await startWorker(port, persistencePath);
+    const created = await api(worker.baseUrl, "/v1/matches", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        gameId: "connect-four",
+        rulesVersion: RULES_VERSION,
+        visibility: "public",
+        seriesTarget: 2,
+      }),
+    });
+    assert.equal(created.response.status, 201);
+    const matchId = created.body.matchId;
+    const waiting = await api(worker.baseUrl, `/v1/matches/${matchId}`, {
+      headers: { Authorization: `Bearer ${created.body.seatToken}` },
+    });
+    assert.equal(waiting.body.status, "waiting");
+    assert.equal(waiting.body.rulesVersion, RULES_VERSION);
+    const stalePreview = await api(worker.baseUrl, `/v1/matches/${matchId}/preview`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ rulesVersion: 1 }),
+    });
+    assert.equal(stalePreview.response.status, 426);
+    const currentPreview = await api(worker.baseUrl, `/v1/matches/${matchId}/preview`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ rulesVersion: RULES_VERSION }),
+    });
+    assert.equal(currentPreview.response.status, 200);
 
-  const legacyCreated = await api(worker.baseUrl, "/v1/matches", {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ visibility: "public", seriesTarget: 1 }),
-  });
-  assert.equal(legacyCreated.response.status, 201);
-  const legacyWaiting = await api(worker.baseUrl, `/v1/matches/${legacyCreated.body.matchId}`, {
-    headers: { Authorization: `Bearer ${legacyCreated.body.seatToken}` },
-  });
-  assert.equal(legacyWaiting.body.rulesVersion, 1);
-  const legacyCompatiblePreview = await api(worker.baseUrl, `/v1/matches/${legacyCreated.body.matchId}/preview`, {
-    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ rulesVersion: 1 }),
-  });
-  assert.equal(legacyCompatiblePreview.response.status, 200);
-  const staleJoin = await api(worker.baseUrl, `/v1/matches/${matchId}/join`, {
-    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ rulesVersion: 1 }),
-  });
-  assert.equal(staleJoin.response.status, 426);
-  const joined = await api(worker.baseUrl, `/v1/matches/${matchId}/join`, {
-    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ rulesVersion: RULES_VERSION }),
-  });
-  assert.equal(joined.response.status, 200);
+    const legacyCreated = await api(worker.baseUrl, "/v1/matches", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ visibility: "public", seriesTarget: 1 }),
+    });
+    assert.equal(legacyCreated.response.status, 201);
+    const legacyWaiting = await api(worker.baseUrl, `/v1/matches/${legacyCreated.body.matchId}`, {
+      headers: { Authorization: `Bearer ${legacyCreated.body.seatToken}` },
+    });
+    assert.equal(legacyWaiting.body.rulesVersion, 1);
+    const legacyCompatiblePreview = await api(
+      worker.baseUrl,
+      `/v1/matches/${legacyCreated.body.matchId}/preview`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rulesVersion: 1 }),
+      },
+    );
+    assert.equal(legacyCompatiblePreview.response.status, 200);
+    const staleJoin = await api(worker.baseUrl, `/v1/matches/${matchId}/join`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ rulesVersion: 1 }),
+    });
+    assert.equal(staleJoin.response.status, 426);
+    const joined = await api(worker.baseUrl, `/v1/matches/${matchId}/join`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ rulesVersion: RULES_VERSION }),
+    });
+    assert.equal(joined.response.status, 200);
 
-  const first = socketClient(worker.baseUrl, matchId, created.body.seatToken);
-  const second = socketClient(worker.baseUrl, matchId, joined.body.seatToken);
-  clients.push(first, second);
-  await Promise.all([first.openAndAuthenticate(), second.openAndAuthenticate()]);
-  const countdownPredicate = (payload) => payload.type === "match" && payload.match.status === "countdown";
-  const [firstCountdown, secondCountdown] = await Promise.all([
-    first.waitFor(countdownPredicate), second.waitFor(countdownPredicate),
-  ]);
-  assert.equal(firstCountdown.match.revision, secondCountdown.match.revision);
-  const activePredicate = (payload) => payload.type === "match" && payload.match.status === "active";
-  const [firstActive, secondActive] = await Promise.all([first.waitFor(activePredicate), second.waitFor(activePredicate)]);
-  assert.ok(firstActive.match.revision > waiting.body.revision);
-  assert.ok(firstActive.match.revision > firstCountdown.match.revision);
-  assert.equal(firstActive.match.revision, secondActive.match.revision);
-  assert.deepEqual(firstActive.match.state, secondActive.match.state);
-  assert.equal(firstActive.match.turnDeadline, null);
-  assert.equal(firstActive.match.awaitingTurnReceipt.seat, firstActive.match.state.nextPlayer);
+    const first = socketClient(worker.baseUrl, matchId, created.body.seatToken);
+    const second = socketClient(worker.baseUrl, matchId, joined.body.seatToken);
+    clients.push(first, second);
+    await Promise.all([first.openAndAuthenticate(), second.openAndAuthenticate()]);
+    const countdownPredicate = (payload) =>
+      payload.type === "match" && payload.match.status === "countdown";
+    const [firstCountdown, secondCountdown] = await Promise.all([
+      first.waitFor(countdownPredicate),
+      second.waitFor(countdownPredicate),
+    ]);
+    assert.equal(firstCountdown.match.revision, secondCountdown.match.revision);
+    const activePredicate = (payload) =>
+      payload.type === "match" && payload.match.status === "active";
+    const [firstActive, secondActive] = await Promise.all([
+      first.waitFor(activePredicate),
+      second.waitFor(activePredicate),
+    ]);
+    assert.ok(firstActive.match.revision > waiting.body.revision);
+    assert.ok(firstActive.match.revision > firstCountdown.match.revision);
+    assert.equal(firstActive.match.revision, secondActive.match.revision);
+    assert.deepEqual(firstActive.match.state, secondActive.match.state);
+    assert.equal(firstActive.match.turnDeadline, null);
+    assert.equal(firstActive.match.awaitingTurnReceipt.seat, firstActive.match.state.nextPlayer);
 
-  const firstStarter = firstActive.match.awaitingTurnReceipt.seat === "first" ? first : second;
-  const initialTurnStarted = Promise.all([
-    first.waitFor((payload) => payload.type === "match" && payload.match.turnDeadline !== null),
-    second.waitFor((payload) => payload.type === "match" && payload.match.turnDeadline !== null),
-  ]);
-  firstStarter.send({ type: "turn-received", revision: firstActive.match.revision });
-  const [firstTurnReady, secondTurnReady] = await initialTurnStarted;
-  assert.equal(firstTurnReady.match.revision, secondTurnReady.match.revision);
-  assert.equal(firstTurnReady.match.awaitingTurnReceipt, null);
+    const firstStarter = firstActive.match.awaitingTurnReceipt.seat === "first" ? first : second;
+    const initialTurnStarted = Promise.all([
+      first.waitFor((payload) => payload.type === "match" && payload.match.turnDeadline !== null),
+      second.waitFor((payload) => payload.type === "match" && payload.match.turnDeadline !== null),
+    ]);
+    firstStarter.send({ type: "turn-received", revision: firstActive.match.revision });
+    const [firstTurnReady, secondTurnReady] = await initialTurnStarted;
+    assert.equal(firstTurnReady.match.revision, secondTurnReady.match.revision);
+    assert.equal(firstTurnReady.match.awaitingTurnReceipt, null);
 
-  const mover = firstTurnReady.match.state.nextPlayer === "first" ? first : second;
-  const moveActionId = "integration-move-1";
-  const action = {
-    protocolVersion: 1, gameId: "connect-four", rulesVersion: RULES_VERSION, type: "submit-action", matchId,
-    actionId: moveActionId, expectedRevision: firstTurnReady.match.revision,
-    action: { type: "drop-token", column: 3 },
-  };
-  const movedPredicate = (payload) => payload.type === "match" && payload.match.state?.moves.length === 1;
-  const moved = Promise.all([first.waitFor(movedPredicate), second.waitFor(movedPredicate)]);
-  mover.send(action);
-  const [firstMoved, secondMoved] = await moved;
-  assert.equal(firstMoved.match.revision, secondMoved.match.revision);
-  assert.deepEqual(firstMoved.match.state, secondMoved.match.state);
-  assert.equal(firstMoved.match.turnDeadline, null);
-  assert.equal(firstMoved.match.awaitingTurnReceipt.seat, firstMoved.match.state.nextPlayer);
+    const mover = firstTurnReady.match.state.nextPlayer === "first" ? first : second;
+    const moveActionId = "integration-move-1";
+    const action = {
+      protocolVersion: 1,
+      gameId: "connect-four",
+      rulesVersion: RULES_VERSION,
+      type: "submit-action",
+      matchId,
+      actionId: moveActionId,
+      expectedRevision: firstTurnReady.match.revision,
+      action: { type: "drop-token", column: 3 },
+    };
+    const movedPredicate = (payload) =>
+      payload.type === "match" && payload.match.state?.moves.length === 1;
+    const moved = Promise.all([first.waitFor(movedPredicate), second.waitFor(movedPredicate)]);
+    mover.send(action);
+    const [firstMoved, secondMoved] = await moved;
+    assert.equal(firstMoved.match.revision, secondMoved.match.revision);
+    assert.deepEqual(firstMoved.match.state, secondMoved.match.state);
+    assert.equal(firstMoved.match.turnDeadline, null);
+    assert.equal(firstMoved.match.awaitingTurnReceipt.seat, firstMoved.match.state.nextPlayer);
 
-  const nextPlayer = firstMoved.match.awaitingTurnReceipt.seat === "first" ? first : second;
-  const nextTurnStarted = Promise.all([
-    first.waitFor((payload) => payload.type === "match" && payload.match.turnDeadline !== null && payload.match.revision > firstMoved.match.revision),
-    second.waitFor((payload) => payload.type === "match" && payload.match.turnDeadline !== null && payload.match.revision > firstMoved.match.revision),
-  ]);
-  nextPlayer.send({ type: "turn-received", revision: firstMoved.match.revision });
-  const [firstNextTurn, secondNextTurn] = await nextTurnStarted;
-  assert.equal(firstNextTurn.match.revision, secondNextTurn.match.revision);
+    const nextPlayer = firstMoved.match.awaitingTurnReceipt.seat === "first" ? first : second;
+    const nextTurnStarted = Promise.all([
+      first.waitFor(
+        (payload) =>
+          payload.type === "match" &&
+          payload.match.turnDeadline !== null &&
+          payload.match.revision > firstMoved.match.revision,
+      ),
+      second.waitFor(
+        (payload) =>
+          payload.type === "match" &&
+          payload.match.turnDeadline !== null &&
+          payload.match.revision > firstMoved.match.revision,
+      ),
+    ]);
+    nextPlayer.send({ type: "turn-received", revision: firstMoved.match.revision });
+    const [firstNextTurn, secondNextTurn] = await nextTurnStarted;
+    assert.equal(firstNextTurn.match.revision, secondNextTurn.match.revision);
 
-  const syncId = "integration-sync-1";
-  const synchronized = mover.waitFor((payload) => payload.type === "match" && payload.syncId === syncId);
-  mover.send({ type: "sync", syncId });
-  const syncSnapshot = await synchronized;
-  assert.equal(syncSnapshot.match.revision, firstNextTurn.match.revision);
-  assert.deepEqual(syncSnapshot.match.state, firstNextTurn.match.state);
-  const rateLimitedSyncId = "integration-sync-2";
-  const rateLimited = mover.waitFor((payload) => payload.type === "sync-rejected" && payload.syncId === rateLimitedSyncId);
-  mover.send({ type: "sync", syncId: rateLimitedSyncId });
-  assert.equal((await rateLimited).code, "rate-limited");
-  for (const type of ["concede-series", "next-game", "rematch"]) {
-    const authoritative = mover.waitFor((payload) => payload.type === "match" && payload.match.revision === firstNextTurn.match.revision);
-    mover.send({ type });
-    const currentMatch = await authoritative;
-    assert.equal(currentMatch.match.status, "active");
-    assert.deepEqual(currentMatch.match.state, firstNextTurn.match.state);
-  }
+    const syncId = "integration-sync-1";
+    const synchronized = mover.waitFor(
+      (payload) => payload.type === "match" && payload.syncId === syncId,
+    );
+    mover.send({ type: "sync", syncId });
+    const syncSnapshot = await synchronized;
+    assert.equal(syncSnapshot.match.revision, firstNextTurn.match.revision);
+    assert.deepEqual(syncSnapshot.match.state, firstNextTurn.match.state);
+    const rateLimitedSyncId = "integration-sync-2";
+    const rateLimited = mover.waitFor(
+      (payload) => payload.type === "sync-rejected" && payload.syncId === rateLimitedSyncId,
+    );
+    mover.send({ type: "sync", syncId: rateLimitedSyncId });
+    assert.equal((await rateLimited).code, "rate-limited");
+    for (const type of ["concede-series", "next-game", "rematch"]) {
+      const authoritative = mover.waitFor(
+        (payload) =>
+          payload.type === "match" && payload.match.revision === firstNextTurn.match.revision,
+      );
+      mover.send({ type });
+      const currentMatch = await authoritative;
+      assert.equal(currentMatch.match.status, "active");
+      assert.deepEqual(currentMatch.match.state, firstNextTurn.match.state);
+    }
 
-  const duplicate = mover.waitFor((payload) => payload.acceptedActionId === moveActionId);
-  mover.send(action);
-  const duplicateResponse = await duplicate;
-  assert.equal(duplicateResponse.match.revision, firstNextTurn.match.revision);
-  assert.equal(duplicateResponse.match.turnDeadline, firstNextTurn.match.turnDeadline);
-  const authorized = await api(worker.baseUrl, `/v1/matches/${matchId}`, {
-    headers: { Authorization: `Bearer ${created.body.seatToken}` },
-  });
-  assert.equal(authorized.response.status, 200);
-  assert.equal(authorized.body.state.moves.length, 1);
-  const unauthorized = await api(worker.baseUrl, `/v1/matches/${matchId}`);
-  assert.equal(unauthorized.response.status, 401);
+    const duplicate = mover.waitFor((payload) => payload.acceptedActionId === moveActionId);
+    mover.send(action);
+    const duplicateResponse = await duplicate;
+    assert.equal(duplicateResponse.match.revision, firstNextTurn.match.revision);
+    assert.equal(duplicateResponse.match.turnDeadline, firstNextTurn.match.turnDeadline);
+    const authorized = await api(worker.baseUrl, `/v1/matches/${matchId}`, {
+      headers: { Authorization: `Bearer ${created.body.seatToken}` },
+    });
+    assert.equal(authorized.response.status, 200);
+    assert.equal(authorized.body.state.moves.length, 1);
+    const unauthorized = await api(worker.baseUrl, `/v1/matches/${matchId}`);
+    assert.equal(unauthorized.response.status, 401);
 
-  const stale = mover.waitFor((payload) => payload.type === "action-rejected" && payload.code === "stale-revision");
-  mover.send({ ...action, actionId: "integration-stale-1", expectedRevision: firstMoved.match.revision - 1 });
-  await stale;
-  const afterStale = await api(worker.baseUrl, `/v1/matches/${matchId}`, {
-    headers: { Authorization: `Bearer ${created.body.seatToken}` },
-  });
-  assert.equal(afterStale.body.state.moves.length, 1);
-  assert.equal(afterStale.body.revision, firstNextTurn.match.revision);
+    const stale = mover.waitFor(
+      (payload) => payload.type === "action-rejected" && payload.code === "stale-revision",
+    );
+    mover.send({
+      ...action,
+      actionId: "integration-stale-1",
+      expectedRevision: firstMoved.match.revision - 1,
+    });
+    await stale;
+    const afterStale = await api(worker.baseUrl, `/v1/matches/${matchId}`, {
+      headers: { Authorization: `Bearer ${created.body.seatToken}` },
+    });
+    assert.equal(afterStale.body.state.moves.length, 1);
+    assert.equal(afterStale.body.revision, firstNextTurn.match.revision);
 
-  clients.splice(0).forEach((client) => client.close());
-  await Promise.all([first, second].map((client) => new Promise((resolve) => client.socket.once("close", resolve))));
-  await stopWorker(worker.process);
-  worker = await startWorker(port, persistencePath);
-  const restored = await api(worker.baseUrl, `/v1/matches/${matchId}`, {
-    headers: { Authorization: `Bearer ${created.body.seatToken}` },
-  });
-  assert.equal(restored.response.status, 200);
-  assert.equal(restored.body.state.moves.length, 1);
-  assert.ok(restored.body.revision >= firstMoved.match.revision);
+    clients.splice(0).forEach((client) => client.close());
+    await Promise.all(
+      [first, second].map(
+        (client) => new Promise((resolve) => client.socket.once("close", resolve)),
+      ),
+    );
+    await stopWorker(worker.process);
+    worker = await startWorker(port, persistencePath);
+    const restored = await api(worker.baseUrl, `/v1/matches/${matchId}`, {
+      headers: { Authorization: `Bearer ${created.body.seatToken}` },
+    });
+    assert.equal(restored.response.status, 200);
+    assert.equal(restored.body.state.moves.length, 1);
+    assert.ok(restored.body.revision >= firstMoved.match.revision);
 
-  const resumedFirst = socketClient(worker.baseUrl, matchId, created.body.seatToken);
-  const resumedSecond = socketClient(worker.baseUrl, matchId, joined.body.seatToken);
-  clients.push(resumedFirst, resumedSecond);
-  await Promise.all([resumedFirst.openAndAuthenticate(), resumedSecond.openAndAuthenticate()]);
-  const connectedPredicate = (payload) => payload.type === "match" && payload.match.connectedSeats.every(Boolean);
-  const [resumedA, resumedB] = await Promise.all([
-    resumedFirst.waitFor(connectedPredicate), resumedSecond.waitFor(connectedPredicate),
-  ]);
-  assert.deepEqual(resumedA.match.state, resumedB.match.state);
-  assert.equal(resumedA.match.state.moves.length, 1);
-});
+    const resumedFirst = socketClient(worker.baseUrl, matchId, created.body.seatToken);
+    const resumedSecond = socketClient(worker.baseUrl, matchId, joined.body.seatToken);
+    clients.push(resumedFirst, resumedSecond);
+    await Promise.all([resumedFirst.openAndAuthenticate(), resumedSecond.openAndAuthenticate()]);
+    const connectedPredicate = (payload) =>
+      payload.type === "match" && payload.match.connectedSeats.every(Boolean);
+    const [resumedA, resumedB] = await Promise.all([
+      resumedFirst.waitFor(connectedPredicate),
+      resumedSecond.waitFor(connectedPredicate),
+    ]);
+    assert.deepEqual(resumedA.match.state, resumedB.match.state);
+    assert.equal(resumedA.match.state.moves.length, 1);
+  },
+);

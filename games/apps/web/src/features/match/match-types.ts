@@ -1,16 +1,19 @@
-import type { PlayerSeat } from '../../../../../packages/contracts/dist/index.js';
+import type { PlayerSeat } from "../../../../../packages/contracts/dist/index.js";
 
 export type LiveMatch = {
   matchId: string;
+  seriesNumber?: number;
+  seriesCompletedAt?: number | null;
   gameId: string;
   rulesVersion: number;
-  visibility: 'public' | 'invite';
-  status: 'waiting' | 'countdown' | 'active' | 'between-games' | 'completed' | 'cancelled' | 'expired';
+  visibility: "public" | "invite";
+  status:
+    "waiting" | "countdown" | "active" | "between-games" | "completed" | "cancelled" | "expired";
   revision: number;
   state: unknown | null;
   connectedSeats?: readonly boolean[];
   playerNames?: readonly (string | null)[];
-  seatKinds?: readonly ('human' | 'ai')[];
+  seatKinds?: readonly ("human" | "ai")[];
   countdownAt: number | null;
   turnDeadline: number | null;
   awaitingTurnReceipt?: { seat: PlayerSeat; deadline: number } | null;
@@ -37,6 +40,7 @@ export type OnlineMultiplayer = {
   seatToken: string;
   seat: PlayerSeat;
   displayName: string | null;
+  accountLinked: boolean;
   connected: boolean;
   revision: number;
   match: LiveMatch | null;
@@ -61,32 +65,86 @@ export type PendingOnlineMove = Readonly<{
 type RecordValue = Record<string, unknown>;
 
 function isRecord(value: unknown): value is RecordValue {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function isPlayerSeat(value: unknown): value is PlayerSeat {
-  return value === 'first' || value === 'second';
+  return value === "first" || value === "second";
 }
 
 /** Parse and validate a server match payload before it enters client state. */
 export function parseLiveMatch(value: unknown): LiveMatch | null {
-  if (!isRecord(value) || typeof value.matchId !== 'string' ||
-    typeof value.gameId !== 'string' || !Number.isSafeInteger(value.rulesVersion) || Number(value.rulesVersion) < 1 || !['public', 'invite'].includes(String(value.visibility)) ||
-    !['waiting', 'countdown', 'active', 'between-games', 'completed', 'cancelled', 'expired'].includes(String(value.status)) ||
-    !Number.isSafeInteger(value.revision) || !Number.isFinite(value.serverNow) || !Number.isFinite(value.expiresAt) ||
-    ![1, 2, 3].includes(Number(value.seriesTarget)) || !Number.isSafeInteger(value.gameNumber)) return null;
+  if (
+    !isRecord(value) ||
+    typeof value.matchId !== "string" ||
+    typeof value.gameId !== "string" ||
+    !Number.isSafeInteger(value.rulesVersion) ||
+    Number(value.rulesVersion) < 1 ||
+    !["public", "invite"].includes(String(value.visibility)) ||
+    ![
+      "waiting",
+      "countdown",
+      "active",
+      "between-games",
+      "completed",
+      "cancelled",
+      "expired",
+    ].includes(String(value.status)) ||
+    !Number.isSafeInteger(value.revision) ||
+    !Number.isFinite(value.serverNow) ||
+    !Number.isFinite(value.expiresAt) ||
+    ![1, 2, 3].includes(Number(value.seriesTarget)) ||
+    !Number.isSafeInteger(value.gameNumber)
+  )
+    return null;
   const wins = value.wins;
-  const nullableNumber = (entry: unknown) => entry === null || (typeof entry === 'number' && Number.isFinite(entry));
-  const optionalSeats = (entry: unknown) => entry === undefined || (Array.isArray(entry) && entry.length === 2 && entry.every((item) => typeof item === 'boolean'));
-  const validSeatKinds = value.seatKinds === undefined || (Array.isArray(value.seatKinds) && value.seatKinds.length === 2 && value.seatKinds.every((item) => item === 'human' || item === 'ai'));
-  const validAiFallback = value.aiFallbackAt === undefined || value.aiFallbackAt === null || Number.isFinite(value.aiFallbackAt);
-  if (!isRecord(wins) || !Number.isSafeInteger(wins.first) || !Number.isSafeInteger(wins.second) ||
-    !nullableNumber(value.countdownAt) || !nullableNumber(value.turnDeadline) || !nullableNumber(value.nextGameDeadline) ||
-    !optionalSeats(value.connectedSeats) || !optionalSeats(value.nextReady) || !optionalSeats(value.rematchReady) || !optionalSeats(value.closedSeats) ||
-    !validSeatKinds || !validAiFallback) return null;
-  if (value.awaitingTurnReceipt !== undefined && value.awaitingTurnReceipt !== null &&
+  const nullableNumber = (entry: unknown) =>
+    entry === null || (typeof entry === "number" && Number.isFinite(entry));
+  const optionalSeats = (entry: unknown) =>
+    entry === undefined ||
+    (Array.isArray(entry) &&
+      entry.length === 2 &&
+      entry.every((item) => typeof item === "boolean"));
+  const validSeatKinds =
+    value.seatKinds === undefined ||
+    (Array.isArray(value.seatKinds) &&
+      value.seatKinds.length === 2 &&
+      value.seatKinds.every((item) => item === "human" || item === "ai"));
+  const validAiFallback =
+    value.aiFallbackAt === undefined ||
+    value.aiFallbackAt === null ||
+    Number.isFinite(value.aiFallbackAt);
+  const validSeriesNumber =
+    value.seriesNumber === undefined ||
+    (Number.isSafeInteger(value.seriesNumber) && Number(value.seriesNumber) > 0);
+  const validSeriesCompletedAt =
+    value.seriesCompletedAt === undefined ||
+    value.seriesCompletedAt === null ||
+    Number.isFinite(value.seriesCompletedAt);
+  if (
+    !isRecord(wins) ||
+    !Number.isSafeInteger(wins.first) ||
+    !Number.isSafeInteger(wins.second) ||
+    !nullableNumber(value.countdownAt) ||
+    !nullableNumber(value.turnDeadline) ||
+    !nullableNumber(value.nextGameDeadline) ||
+    !optionalSeats(value.connectedSeats) ||
+    !optionalSeats(value.nextReady) ||
+    !optionalSeats(value.rematchReady) ||
+    !optionalSeats(value.closedSeats) ||
+    !validSeatKinds ||
+    !validAiFallback ||
+    !validSeriesNumber ||
+    !validSeriesCompletedAt
+  )
+    return null;
+  if (
+    value.awaitingTurnReceipt !== undefined &&
+    value.awaitingTurnReceipt !== null &&
     (!isRecord(value.awaitingTurnReceipt) ||
       !isPlayerSeat(value.awaitingTurnReceipt.seat) ||
-      !Number.isFinite(value.awaitingTurnReceipt.deadline))) return null;
+      !Number.isFinite(value.awaitingTurnReceipt.deadline))
+  )
+    return null;
   return value as unknown as LiveMatch;
 }

@@ -1,15 +1,17 @@
-export type MatchSeat = 'first' | 'second';
-export type MatchOperation = 'creating' | 'joining';
+export type MatchSeat = "first" | "second";
+export type MatchOperation = "creating" | "joining";
 export type MatchCredential = Readonly<{
   seatToken: string;
   seat: MatchSeat;
   displayName?: string | null;
   gameId?: string;
+  accountLinked?: boolean;
 }>;
-export type ActiveMatch = MatchCredential & Readonly<{
-  matchId: string;
-  gameId?: string;
-}>;
+export type ActiveMatch = MatchCredential &
+  Readonly<{
+    matchId: string;
+    gameId?: string;
+  }>;
 export type MatchReservation = Readonly<{
   pending: true;
   attemptId: string | null;
@@ -19,27 +21,37 @@ export type MatchReservation = Readonly<{
 }>;
 export type DeviceMatchLock = ActiveMatch | MatchReservation;
 
-const ACTIVE_MATCH_KEY = 'games-active-match';
+const ACTIVE_MATCH_KEY = "games-active-match";
 const MATCH_SETUP_LOCK_TIMEOUT_MS = 120_000;
 const MATCH_ID_PATTERN = /^[A-Za-z0-9_-]{22}$/;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === 'object' && !Array.isArray(value);
+  return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
 function isSeat(value: unknown): value is MatchSeat {
-  return value === 'first' || value === 'second';
+  return value === "first" || value === "second";
 }
 
 function parseLock(value: unknown): DeviceMatchLock | null {
   if (!isRecord(value)) return null;
-  if (value.pending === true && typeof value.attemptId === 'string' &&
-    (value.operation === 'creating' || value.operation === 'joining') &&
-    (value.matchId === null || typeof value.matchId === 'string') && Number.isFinite(value.createdAt)) {
+  if (
+    value.pending === true &&
+    typeof value.attemptId === "string" &&
+    (value.operation === "creating" || value.operation === "joining") &&
+    (value.matchId === null || typeof value.matchId === "string") &&
+    Number.isFinite(value.createdAt)
+  ) {
     return value as unknown as MatchReservation;
   }
-  if (typeof value.matchId === 'string' && MATCH_ID_PATTERN.test(value.matchId) &&
-    typeof value.seatToken === 'string' && value.seatToken.length > 0 && isSeat(value.seat)) {
+  if (
+    typeof value.matchId === "string" &&
+    MATCH_ID_PATTERN.test(value.matchId) &&
+    typeof value.seatToken === "string" &&
+    value.seatToken.length > 0 &&
+    isSeat(value.seat)
+  ) {
+    if (value.accountLinked !== undefined && typeof value.accountLinked !== "boolean") return null;
     return value as unknown as ActiveMatch;
   }
   return null;
@@ -56,7 +68,7 @@ export class MatchSessionStorage {
         localStorage.removeItem(ACTIVE_MATCH_KEY);
         return null;
       }
-      if ('pending' in parsed && Date.now() - parsed.createdAt > MATCH_SETUP_LOCK_TIMEOUT_MS) {
+      if ("pending" in parsed && Date.now() - parsed.createdAt > MATCH_SETUP_LOCK_TIMEOUT_MS) {
         localStorage.removeItem(ACTIVE_MATCH_KEY);
         return null;
       }
@@ -68,10 +80,13 @@ export class MatchSessionStorage {
 
   readActiveMatch(): ActiveMatch | null {
     const lock = this.readLock();
-    return lock && !('pending' in lock) ? lock : null;
+    return lock && !("pending" in lock) ? lock : null;
   }
 
-  async reserve(operation: MatchOperation, matchId: string | null = null): Promise<MatchReservation | null> {
+  async reserve(
+    operation: MatchOperation,
+    matchId: string | null = null,
+  ): Promise<MatchReservation | null> {
     let reservation: MatchReservation | null = null;
     const tryReserve = (): void => {
       if (this.readLock()) return;
@@ -91,7 +106,7 @@ export class MatchSessionStorage {
     };
 
     if (navigator.locks?.request) {
-      await navigator.locks.request('games-active-match-reservation', tryReserve);
+      await navigator.locks.request("games-active-match-reservation", tryReserve);
     } else {
       tryReserve();
     }
@@ -102,7 +117,8 @@ export class MatchSessionStorage {
     if (!reservation?.attemptId) return false;
     try {
       const current = this.readLock();
-      if (!current || !('pending' in current) || current.attemptId !== reservation.attemptId) return false;
+      if (!current || !("pending" in current) || current.attemptId !== reservation.attemptId)
+        return false;
       localStorage.removeItem(ACTIVE_MATCH_KEY);
       return true;
     } catch {
@@ -111,7 +127,9 @@ export class MatchSessionStorage {
   }
 
   saveActiveMatch(match: ActiveMatch): void {
-    try { localStorage.setItem(ACTIVE_MATCH_KEY, JSON.stringify(match)); } catch {
+    try {
+      localStorage.setItem(ACTIVE_MATCH_KEY, JSON.stringify(match));
+    } catch {
       // The current tab can still recover the seat from session storage.
     }
   }
@@ -129,12 +147,19 @@ export class MatchSessionStorage {
 
   readSeat(matchId: string): MatchCredential | null {
     try {
-      const value: unknown = JSON.parse(sessionStorage.getItem(`games-seat:${matchId}`) ?? 'null');
-      if (!isRecord(value) || typeof value.seatToken !== 'string' || value.seatToken.length === 0 || !isSeat(value.seat)) return null;
+      const value: unknown = JSON.parse(sessionStorage.getItem(`games-seat:${matchId}`) ?? "null");
+      if (
+        !isRecord(value) ||
+        typeof value.seatToken !== "string" ||
+        value.seatToken.length === 0 ||
+        !isSeat(value.seat)
+      )
+        return null;
       return {
         seatToken: value.seatToken,
         seat: value.seat,
-        displayName: typeof value.displayName === 'string' ? value.displayName : null,
+        displayName: typeof value.displayName === "string" ? value.displayName : null,
+        ...(typeof value.accountLinked === "boolean" ? { accountLinked: value.accountLinked } : {}),
       };
     } catch {
       return null;
@@ -142,22 +167,42 @@ export class MatchSessionStorage {
   }
 
   saveSeat(matchId: string, credential: MatchCredential): void {
-    try { sessionStorage.setItem(`games-seat:${matchId}`, JSON.stringify(credential)); } catch {}
+    try {
+      sessionStorage.setItem(`games-seat:${matchId}`, JSON.stringify(credential));
+    } catch {
+      // Session storage can be unavailable in private browsing; the match still works in memory.
+    }
   }
 
   removeSeat(matchId: string): void {
-    try { sessionStorage.removeItem(`games-seat:${matchId}`); } catch {}
+    try {
+      sessionStorage.removeItem(`games-seat:${matchId}`);
+    } catch {
+      // Ignore unavailable storage; the active tab can still finish the match.
+    }
   }
 
   readInviteLink(matchId: string): string {
-    try { return sessionStorage.getItem(`games-invite-link:${matchId}`) ?? ''; } catch { return ''; }
+    try {
+      return sessionStorage.getItem(`games-invite-link:${matchId}`) ?? "";
+    } catch {
+      return "";
+    }
   }
 
   saveInviteLink(matchId: string, link: string): void {
-    try { sessionStorage.setItem(`games-invite-link:${matchId}`, link); } catch {}
+    try {
+      sessionStorage.setItem(`games-invite-link:${matchId}`, link);
+    } catch {
+      // Sharing still works for this tab even when session storage is unavailable.
+    }
   }
 
   removeInviteLink(matchId: string): void {
-    try { sessionStorage.removeItem(`games-invite-link:${matchId}`); } catch {}
+    try {
+      sessionStorage.removeItem(`games-invite-link:${matchId}`);
+    } catch {
+      // The invite link expires server-side, so unavailable local cleanup is safe.
+    }
   }
 }

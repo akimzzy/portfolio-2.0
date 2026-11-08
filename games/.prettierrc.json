@@ -1,0 +1,17 @@
+{
+  "arrowParens": "always",
+  "plugins": ["prettier-plugin-sql"],
+  "printWidth": 100,
+  "semi": true,
+  "singleQuote": false,
+  "trailingComma": "all",
+  "overrides": [
+    {
+      "files": "*.sql",
+      "options": {
+        "keywordCase": "upper",
+        "language": "postgresql"
+      }
+    }
+  ]
+}

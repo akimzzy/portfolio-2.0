@@ -1,5 +1,5 @@
-import type { ConnectFourOpponentId } from './opponents.js';
-import type { ConnectFourState } from './index.js';
+import type { ConnectFourOpponentId } from "./opponents.js";
+import type { ConnectFourState } from "./index.js";
 
 type Candidate = { column: number; score: number };
 type Profile = { depth: number; nodes: number; center: number; attack: number; defense: number };
@@ -23,11 +23,20 @@ const ROWS = 6;
 const COLUMNS = 7;
 const WIN = 100_000;
 const ORDER = [3, 2, 4, 1, 5, 0, 6] as const;
-const DIRECTIONS = [[0, 1], [1, 0], [1, 1], [1, -1]] as const;
+const DIRECTIONS = [
+  [0, 1],
+  [1, 0],
+  [1, 1],
+  [1, -1],
+] as const;
 
-function seatNumber(seat: 'first' | 'second'): number { return seat === 'first' ? 1 : 2; }
+function seatNumber(seat: "first" | "second"): number {
+  return seat === "first" ? 1 : 2;
+}
 
-function indexOf(row: number, column: number): number { return row * COLUMNS + column; }
+function indexOf(row: number, column: number): number {
+  return row * COLUMNS + column;
+}
 
 function drop(board: Int8Array, heights: number[], column: number, player: number): number {
   const row = ROWS - 1 - heights[column]!;
@@ -72,10 +81,17 @@ function winningColumns(board: Int8Array, heights: number[], player: number): nu
   return wins;
 }
 
-function opponentCanCreateFork(board: Int8Array, heights: number[], opponent: number, player: number): boolean {
+function opponentCanCreateFork(
+  board: Int8Array,
+  heights: number[],
+  opponent: number,
+  player: number,
+): boolean {
   for (const column of legalColumns(heights)) {
     const row = drop(board, heights, column, opponent);
-    const winsNext = winningColumns(board, heights, player).length === 0 && winningColumns(board, heights, opponent).length >= 2;
+    const winsNext =
+      winningColumns(board, heights, player).length === 0 &&
+      winningColumns(board, heights, opponent).length >= 2;
     undo(board, heights, column, row);
     if (winsNext) return true;
   }
@@ -144,7 +160,17 @@ function search(
     if (isWin(board, row, column, player)) {
       value = player === root ? WIN + depth : -WIN - depth;
     } else {
-      value = search(board, heights, player === 1 ? 2 : 1, root, depth - 1, alpha, beta, profile, budget);
+      value = search(
+        board,
+        heights,
+        player === 1 ? 2 : 1,
+        root,
+        depth - 1,
+        alpha,
+        beta,
+        profile,
+        budget,
+      );
     }
     undo(board, heights, column, row);
     if (player === root) {
@@ -161,7 +187,9 @@ function search(
 
 function tieIndex(seed: number, ply: number, length: number): number {
   let value = (seed ^ Math.imul(ply + 1, 0x9e3779b1)) >>> 0;
-  value ^= value << 13; value ^= value >>> 17; value ^= value << 5;
+  value ^= value << 13;
+  value ^= value >>> 17;
+  value ^= value << 5;
   return (value >>> 0) % length;
 }
 
@@ -172,17 +200,24 @@ function tieIndex(seed: number, ply: number, length: number): number {
  */
 function chooseConnectFourMoveWithProfile(
   state: ConnectFourState,
-  seat: 'first' | 'second',
+  seat: "first" | "second",
   profile: Profile,
   seed: number,
 ): number {
-  const board = Int8Array.from(state.board.flatMap((row) => row.map((cell) => cell === 'first' ? 1 : cell === 'second' ? 2 : 0)));
-  const heights = Array.from({ length: COLUMNS }, (_, column) => state.board.reduce((sum, row) => sum + (row[column] === null ? 0 : 1), 0));
+  const board = Int8Array.from(
+    state.board.flatMap((row) =>
+      row.map((cell) => (cell === "first" ? 1 : cell === "second" ? 2 : 0)),
+    ),
+  );
+  const heights = Array.from({ length: COLUMNS }, (_, column) =>
+    state.board.reduce((sum, row) => sum + (row[column] === null ? 0 : 1), 0),
+  );
   const legal = legalColumns(heights);
-  if (!legal.length) throw new RangeError('No legal Connect Four move is available.');
+  if (!legal.length) throw new RangeError("No legal Connect Four move is available.");
   const player = seatNumber(seat);
   const immediateWins = winningColumns(board, heights, player);
-  if (immediateWins.length) return immediateWins[tieIndex(seed, state.moves.length, immediateWins.length)]!;
+  if (immediateWins.length)
+    return immediateWins[tieIndex(seed, state.moves.length, immediateWins.length)]!;
   const opponentWins = winningColumns(board, heights, player === 1 ? 2 : 1);
   // One open winning square is a forced block (placing in any other column
   // leaves that square playable). Multiple threats are handled by search.
@@ -195,7 +230,17 @@ function chooseConnectFourMoveWithProfile(
     const budget = { nodes: 0, maximum: perCandidateBudget };
     const value = isWin(board, row, column, player)
       ? WIN
-      : search(board, heights, player === 1 ? 2 : 1, player, profile.depth - 1, -Infinity, Infinity, profile, budget);
+      : search(
+          board,
+          heights,
+          player === 1 ? 2 : 1,
+          player,
+          profile.depth - 1,
+          -Infinity,
+          Infinity,
+          profile,
+          budget,
+        );
     undo(board, heights, column, row);
     scored.push({ column, score: value });
     best = Math.max(best, value);
@@ -206,7 +251,7 @@ function chooseConnectFourMoveWithProfile(
 
 function chooseConnectFourMoveV1(
   state: ConnectFourState,
-  seat: 'first' | 'second',
+  seat: "first" | "second",
   profileId: ConnectFourOpponentId,
   seed: number,
 ): number {
@@ -221,14 +266,20 @@ function chooseConnectFourMoveV1(
  */
 function chooseConnectFourMoveV2(
   state: ConnectFourState,
-  seat: 'first' | 'second',
+  seat: "first" | "second",
   profileId: ConnectFourOpponentId,
   seed: number,
 ): number {
-  const board = Int8Array.from(state.board.flatMap((row) => row.map((cell) => cell === 'first' ? 1 : cell === 'second' ? 2 : 0)));
-  const heights = Array.from({ length: COLUMNS }, (_, column) => state.board.reduce((sum, row) => sum + (row[column] === null ? 0 : 1), 0));
+  const board = Int8Array.from(
+    state.board.flatMap((row) =>
+      row.map((cell) => (cell === "first" ? 1 : cell === "second" ? 2 : 0)),
+    ),
+  );
+  const heights = Array.from({ length: COLUMNS }, (_, column) =>
+    state.board.reduce((sum, row) => sum + (row[column] === null ? 0 : 1), 0),
+  );
   const legal = legalColumns(heights);
-  if (!legal.length) throw new RangeError('No legal Connect Four move is available.');
+  if (!legal.length) throw new RangeError("No legal Connect Four move is available.");
   const player = seatNumber(seat);
   const opponent = player === 1 ? 2 : 1;
   const ply = state.moves.length;
@@ -266,7 +317,17 @@ function chooseConnectFourMoveV2(
     const budget = { nodes: 0, maximum: perCandidateBudget };
     const value = isWin(board, row, column, player)
       ? WIN
-      : search(board, heights, opponent, player, profile.depth - 1, -Infinity, Infinity, profile, budget);
+      : search(
+          board,
+          heights,
+          opponent,
+          player,
+          profile.depth - 1,
+          -Infinity,
+          Infinity,
+          profile,
+          budget,
+        );
     undo(board, heights, column, row);
     scored.push({ column, score: value });
     best = Math.max(best, value);
@@ -288,21 +349,28 @@ export function supportsConnectFourAiEngineVersion(engineVersion: number): boole
 /** Resolve a persisted engine version so active matches survive later AI upgrades. */
 export function chooseConnectFourMoveForVersion(
   state: ConnectFourState,
-  seat: 'first' | 'second',
+  seat: "first" | "second",
   profileId: ConnectFourOpponentId,
   seed: number,
   engineVersion: number,
 ): number {
   const selector = MOVE_SELECTORS[engineVersion];
-  if (!selector) throw new RangeError(`Unsupported Connect Four AI engine version: ${engineVersion}`);
+  if (!selector)
+    throw new RangeError(`Unsupported Connect Four AI engine version: ${engineVersion}`);
   return selector(state, seat, profileId, seed);
 }
 
 export function chooseConnectFourMove(
   state: ConnectFourState,
-  seat: 'first' | 'second',
+  seat: "first" | "second",
   profileId: ConnectFourOpponentId,
   seed: number,
 ): number {
-  return chooseConnectFourMoveForVersion(state, seat, profileId, seed, CONNECT_FOUR_AI_ENGINE_VERSION);
+  return chooseConnectFourMoveForVersion(
+    state,
+    seat,
+    profileId,
+    seed,
+    CONNECT_FOUR_AI_ENGINE_VERSION,
+  );
 }

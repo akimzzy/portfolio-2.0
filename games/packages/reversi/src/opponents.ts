@@ -6,7 +6,7 @@ export const REVERSI_OPPONENTS = Object.freeze([
   Object.freeze({ id: "aggressive", name: "Aggressive", style: "Pressures the board" }),
 ] as const);
 
-export type ReversiOpponentId = typeof REVERSI_OPPONENTS[number]["id"];
+export type ReversiOpponentId = (typeof REVERSI_OPPONENTS)[number]["id"];
 
 export function isReversiOpponentId(value: unknown): value is ReversiOpponentId {
   return typeof value === "string" && REVERSI_OPPONENTS.some((opponent) => opponent.id === value);

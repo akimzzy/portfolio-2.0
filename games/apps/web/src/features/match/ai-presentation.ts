@@ -2,8 +2,7 @@ const AI_MOVE_DELAY_MIN_MS = 1_000;
 const AI_MOVE_DELAY_MODE_MS = 3_000;
 const AI_MOVE_DELAY_MAX_MS = 10_000;
 const AI_MOVE_DELAY_MODE_QUANTILE =
-  (AI_MOVE_DELAY_MODE_MS - AI_MOVE_DELAY_MIN_MS) /
-  (AI_MOVE_DELAY_MAX_MS - AI_MOVE_DELAY_MIN_MS);
+  (AI_MOVE_DELAY_MODE_MS - AI_MOVE_DELAY_MIN_MS) / (AI_MOVE_DELAY_MAX_MS - AI_MOVE_DELAY_MIN_MS);
 
 /**
  * Client-only pacing keeps server work unchanged. A triangular distribution

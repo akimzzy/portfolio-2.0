@@ -1,0 +1,11 @@
+#!/bin/sh
+set -eu
+
+repo_root=$(git rev-parse --show-toplevel)
+if [ -f "$repo_root/games/package.json" ]; then
+  games_root="$repo_root/games"
+else
+  games_root="$repo_root"
+fi
+
+npm --prefix "$games_root" run check:quality

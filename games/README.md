@@ -16,6 +16,8 @@ npm test
 
 `npm run dev` starts the web app and local Worker together. `npm run check` builds and type-checks the application and packages, then runs the tests using Node's test runner. Tests import the compiled package exports. No separate test framework is needed.
 
+For readable and consistent changes, use `npm run lint` for ESLint and `npm run format` to format supported source and documentation files. `npm run format:check` verifies formatting without changing files, and `npm run check:quality` runs lint, format verification, and TypeScript checks. Run `npm run hooks:install` once to install the Git pre-push quality check.
+
 From the portfolio root, install this workspace with `npm --prefix games ci`, then use `npm run dev:games`, `npm run check:games`, `npm run build:games`, or `npm run test:games`. The portfolio and Games have independent lockfiles; installing portfolio dependencies does not install this workspace.
 
 For separate terminals, `npm run dev:worker` starts the Cloudflare-compatible Worker and Durable Object emulator at `http://127.0.0.1:8787`; `npm run dev:web` starts Vite at `http://127.0.0.1:4178`. The web server proxies API and WebSocket requests to the Worker. For phone testing on the same network, set `GAMES_WEB_HOST=0.0.0.0` and allow the phone's exact app origin in the local Worker's `ALLOWED_ORIGINS`. This local path uses the Durable Object emulator and is not evidence of deployed Cloudflare behavior, production capacity, OAuth, account persistence, wallets, or payments. The Cabinet Grotesk font and license are included under `apps/web/assets/`. Build outputs are generated into each package's ignored `dist/` directory.
@@ -61,28 +63,28 @@ Production and preview Workers use separate Durable Object namespaces. Switching
 
 The web client is React + Vite. Its source uses feature and responsibility folders; this is an organizational choice, not a Next.js route convention:
 
-| Path | Responsibility |
-| --- | --- |
-| `apps/web/src/app/` | React app shell, app-level store, application controller, and the UI-facing controller contract. |
-| `apps/web/src/features/lobby/` | Lobby screen and public-match listing client. |
+| Path                           | Responsibility                                                                                                                                      |
+| ------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `apps/web/src/app/`            | React app shell, app-level store, application controller, and the UI-facing controller contract.                                                    |
+| `apps/web/src/features/lobby/` | Lobby screen and public-match listing client.                                                                                                       |
 | `apps/web/src/features/match/` | Shared match shell, match view store/model, payload validation, device-local message history, and game-specific renderers under `games/<game-id>/`. |
-| `apps/web/src/games/` | Browser-safe game rules registry and lobby catalog metadata. |
-| `apps/worker/src/games/` | Server-side game rules registry; no UI or browser dependencies. |
-| `apps/web/src/components/` | Reusable UI such as the shared countdown display. |
-| `apps/web/src/services/match/` | Match HTTP operations, WebSocket transport, session coordination, and browser persistence. |
-| `apps/web/src/shared/` | Small utilities shared by app features, including the clock store and dialog behavior. |
-| `apps/web/src/main.tsx` | Vite/React browser entry point. |
+| `apps/web/src/games/`          | Browser-safe game rules registry and lobby catalog metadata.                                                                                        |
+| `apps/worker/src/games/`       | Server-side game rules registry; no UI or browser dependencies.                                                                                     |
+| `apps/web/src/components/`     | Reusable UI such as the shared countdown display.                                                                                                   |
+| `apps/web/src/services/match/` | Match HTTP operations, WebSocket transport, session coordination, and browser persistence.                                                          |
+| `apps/web/src/shared/`         | Small utilities shared by app features, including the clock store and dialog behavior.                                                              |
+| `apps/web/src/main.tsx`        | Vite/React browser entry point.                                                                                                                     |
 
 `app/application-controller.ts` is frontend orchestration: it translates UI actions and session events into app/view state. Feature screens depend on `app/controller-contract.ts`, not the controller implementation. The controller is not the online authority. Each `packages/<game>` module owns deterministic rules, legal actions, state parsing, and game-state selectors; `packages/contracts` owns shared protocol types and the type-erased runtime adapter; the Worker owns HTTP/WebSocket handling, authoritative match state, turn deadlines, and Durable Object lifecycle. `features/match` owns the shared session UI, while `features/match/games/<game-id>/` owns that game's visual board and input mapping. The worker and browser have explicit registries. Keep game rules and board-specific rendering out of the shared controller and match shell.
 
 ## Package boundaries
 
-| Package | Owns | Allowed imports |
-| --- | --- | --- |
-| `@portfolio-games/contracts` | Protocol version, game identity, two-player module interface, action/state/rejection envelopes, outcomes, runtime adapter and registry | Standard ECMAScript only |
-| `@portfolio-games/connect-four` | Connect Four rules versions 1 and 2, immutable game state, action validation, state restoration | Contracts and standard ECMAScript only |
-| `@portfolio-games/reversi` | Reversi rules version 1, legal move generation, disc flips, forced passes, terminal scoring, and bounded opponent strategies | Contracts and standard ECMAScript only |
-| `@portfolio-games/worker` | Cloudflare HTTP/WebSocket adapter and per-match Durable Object lifecycle | Provider-independent game rules and contracts |
+| Package                         | Owns                                                                                                                                   | Allowed imports                               |
+| ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------- |
+| `@portfolio-games/contracts`    | Protocol version, game identity, two-player module interface, action/state/rejection envelopes, outcomes, runtime adapter and registry | Standard ECMAScript only                      |
+| `@portfolio-games/connect-four` | Connect Four rules versions 1 and 2, immutable game state, action validation, state restoration                                        | Contracts and standard ECMAScript only        |
+| `@portfolio-games/reversi`      | Reversi rules version 1, legal move generation, disc flips, forced passes, terminal scoring, and bounded opponent strategies           | Contracts and standard ECMAScript only        |
+| `@portfolio-games/worker`       | Cloudflare HTTP/WebSocket adapter and per-match Durable Object lifecycle                                                               | Provider-independent game rules and contracts |
 
 Keep client rendering, server identity, transport, storage, deadlines, and deployment configuration outside these packages. A future game can supply another module implementing the current two-player interface. Other player counts or simultaneous-action games may require a new interface; this is not a universal game engine.
 
@@ -91,10 +93,10 @@ Keep client rendering, server identity, transport, storage, deadlines, and deplo
 After building, run this as an ES module from within the workspace:
 
 ```js
-import { createGame, applyAction } from '@portfolio-games/connect-four';
+import { createGame, applyAction } from "@portfolio-games/connect-four";
 
-const state = createGame('first');
-const result = applyAction(state, 'first', { type: 'drop-token', column: 3 });
+const state = createGame("first");
+const result = applyAction(state, "first", { type: "drop-token", column: 3 });
 
 if (result.ok) {
   console.log(result.value.board); // Row 0 is the top; column 0 is the left.
@@ -148,17 +150,19 @@ The current platform contract targets deterministic, turn-based, two-player game
 
 Retain every rules version used by an active room until rooms using it have expired or been deliberately drained. Do not remove a module just because it is no longer used for new rooms. Shared contracts do not contain Connect Four dimensions or actions; the generic session still assumes two seats and one action at a time.
 
-The workspace contains its own app, Worker, packages, lockfile, compiler configuration, assets, and operational documentation, so it can be copied and run without the portfolio checkout. It still depends on separately configured Cloudflare resources for deployment. The account foundation uses Supabase Auth and profiles; configure the browser and each Worker environment separately. Authenticated completed-series history is implemented below. The account roadmap includes guest-history transfer, public leaderboards, and friends with per-friend match totals and records. These are not implemented. Virtual currency, payments, and cash-out are also not implemented.
+The workspace contains its own app, Worker, packages, lockfile, compiler configuration, assets, and operational documentation, so it can be copied and run without the portfolio checkout. It still depends on separately configured Cloudflare resources for deployment. The account foundation uses Supabase Auth and profiles; configure the browser and each Worker environment separately. Authenticated completed-series history is implemented below. Guest-history transfer is an explicit import from this device; imported records are marked unverified and excluded from rankings. The guest-history migration and leaderboard/in-house identity migration are applied to the shared Games Supabase project. The account rank-summary RPC (`202611080002_account_leaderboard_ranks.sql`) and caller-rank extension (`202611080003_leaderboard_my_entry.sql`) are newly added locally and have not been applied; deploy the matching UI only after both additive migrations are reviewed, applied in order, and verified. Friends with per-friend match totals and records remain future work. Virtual currency, payments, and cash-out are also not implemented.
 
 ## Accounts and Supabase setup
 
-The account foundation uses Supabase Auth for Google sign-in and a `public.profiles` row for each unique username. Migration `supabase/migrations/202611050001_account_profiles.sql` is applied to the configured Games project; apply it to any additional project before enabling sign-in there. The browser uses the Supabase publishable/anon key for identity operations. The Worker additionally needs `SUPABASE_SECRET_KEY` to write authoritative game-history rows; it must stay in Worker secrets and must never be exposed to the browser or committed. The Worker also accepts the legacy `SUPABASE_SERVICE_ROLE_KEY` JWT during migration, but prefer the newer secret key. Row Level Security allows a signed-in user to read only their own profile and history, while only the Worker service role can write history. The `claim_username` function atomically reserves a case-insensitive username. Usernames are 3–20 ASCII letters, numbers, or underscores, must start with a letter, and cannot use reserved support/system names. A username is claimed once and cannot currently be changed.
+The account foundation uses Supabase Auth for Google sign-in and a `public.profiles` row for each unique username. Migration `supabase/migrations/202611050001_account_profiles.sql` is applied to the configured Games project; apply it to any additional project before enabling sign-in there. The browser uses the Supabase publishable/anon key for identity operations. The Worker additionally needs `SUPABASE_SECRET_KEY` to write authoritative game-history rows; it must stay in Worker secrets and must never be exposed to the browser or committed. It is configured on the production Worker. The Worker also accepts the legacy `SUPABASE_SERVICE_ROLE_KEY` JWT during migration, but prefer the newer secret key. Row Level Security allows a signed-in user to read only their own profile and history. Verified history is written by the Worker; the guest-import migration adds an authenticated RPC that can only add rows marked `guest_import`. The `claim_username` function atomically reserves a case-insensitive username. Usernames are 3–20 ASCII letters, numbers, or underscores, must start with a letter, and cannot use reserved support/system names. A username is claimed once and cannot currently be changed.
 
 Configure Google as an Auth provider in the Supabase dashboard. Register `https://play.ake-em.com` and local app origins such as `http://localhost:4178` in the allowed redirect URLs, and configure Google's authorized origin plus the Supabase Auth callback URL exactly as shown in the dashboard. Keep production and local provider credentials in the Supabase dashboard; no Google client secret belongs in this repository.
 
 For the web build, copy `.env.example` to `.env.local` and set `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`. Set the same project URL and publishable/anon key as `SUPABASE_URL` and `SUPABASE_ANON_KEY` in each Worker environment, and in `apps/worker/.dev.vars` for local work. Add the Supabase secret key only to `apps/worker/.dev.vars` locally and as the `SUPABASE_SECRET_KEY` Worker secret in production and preview. The Worker verifies account identity during room creation/join, then stores the verified user ID and username on the private match record. Guest create/join requests do not call Supabase. Live moves, reactions, and turn clocks remain on the existing Durable Object path and add no Supabase traffic. At series completion, the Worker asynchronously upserts one compact history row per signed-in participant. It does not save moves, chat, guest-only matches, or unfinished series. Match play does not wait for this write. The account panel reads at most 20 rows under owner-only RLS.
 
-Game history contains completed series only and is not a move/action log. It is kept separately from the Durable Object's 24-hour operational room storage. Guest-history transfer, leaderboards, and friend records remain future work. The account migration and `supabase/migrations/202611070001_game_history.sql` are applied to the Games project. Set `SUPABASE_SECRET_KEY` in the Worker before deploying the history writer. Never expose this secret in the web app or source control.
+Game history contains completed series only and is not a move/action log. It is kept separately from the Durable Object's 24-hour operational room storage. The account migrations `202611050001_account_profiles.sql` and `202611070001_game_history.sql` are applied to the Games project. The guest import migration `202611080001_guest_history_import.sql` is also applied to that shared project. Guest results are kept on the device until the signed-in user explicitly imports them; the import is idempotent, capped at 100 rows per request, and marked `guest_import` so they stay unranked. This feature adds no Worker request. The leaderboard migration `20261107204750_leaderboards.sql` is additive and applied. It adds ten stable in-house identities, idempotent completed-series ranking writes, daily pair/game limits, profile visibility, daily snapshots, and a public read RPC. Ranked results include completed public and private series; rematches, guests, imported rows, and repeat series against the same opponent in the same game/day are excluded. Snapshots cover all-time, week, month, and year through the previous Africa/Lagos day and are published at 00:15 WAT. Existing history defaults to `unranked_legacy`; it is not backfilled into rankings. The account rank-summary RPC (`202611080002_account_leaderboard_ranks.sql`) and caller-rank extension (`202611080003_leaderboard_my_entry.sql`) are separate additive changes and remain unapplied; apply and verify both in order before releasing the matching profile and leaderboard UI. Never expose the Supabase secret key in the web app or source control.
+
+To inspect long-list leaderboard layout without creating database records, run `npm run dev:web` in development and open `http://localhost:4178/?view=leaderboard&leaderboardPreview=long`. The query flag is honored only by the Vite development build; it does not replace production leaderboard data.
 
 For local work, add the secret key to `apps/worker/.dev.vars` (the example file documents the key name). For production, configure it as a Worker secret with `npx wrangler secret put SUPABASE_SECRET_KEY --config apps/worker/wrangler.production.jsonc`. Supabase secret keys are sent in the `apikey` header only; the Worker retains compatibility with legacy service-role JWTs. This is a server-only secret and is not required by the web build.
 

@@ -9,7 +9,10 @@ interface DurableObjectStorage {
   deleteAlarm(): Promise<void>;
 }
 interface SqlStorage {
-  exec<T extends Record<string, unknown>>(query: string, ...bindings: (string | number | null)[]): { toArray(): T[]; rowsWritten: number };
+  exec<T extends Record<string, unknown>>(
+    query: string,
+    ...bindings: (string | number | null)[]
+  ): { toArray(): T[]; rowsWritten: number };
 }
 interface DurableObjectState {
   storage: DurableObjectStorage;
@@ -21,9 +24,14 @@ interface DurableObjectNamespace<T> {
   idFromName(name: string): unknown;
   get(id: unknown): T;
 }
-interface DurableObjectStub { fetch(request: Request): Promise<Response>; }
-interface RateLimitBinding { limit(input: { key: string }): Promise<{ success: boolean }>; }
+interface DurableObjectStub {
+  fetch(request: Request): Promise<Response>;
+}
+interface RateLimitBinding {
+  limit(input: { key: string }): Promise<{ success: boolean }>;
+}
 interface WorkerEnv {
+  APP_ENV?: "production" | "preview" | "development";
   MATCHES: DurableObjectNamespace<DurableObjectStub>;
   LOBBY_HUB: DurableObjectNamespace<DurableObjectStub>;
   ROOMS_RATE_LIMITER: RateLimitBinding;
@@ -34,11 +42,16 @@ interface WorkerEnv {
   /** Legacy JWT key; prefer SUPABASE_SECRET_KEY. */
   SUPABASE_SERVICE_ROLE_KEY?: string;
 }
-interface WebSocketPair { 0: WebSocket; 1: WebSocket; }
+interface WebSocketPair {
+  0: WebSocket;
+  1: WebSocket;
+}
 declare const WebSocketPair: { new (): WebSocketPair };
 
 interface WebSocket {
   serializeAttachment?(attachment: unknown): void;
   deserializeAttachment?(): unknown;
 }
-interface ResponseInit { webSocket?: WebSocket; }
+interface ResponseInit {
+  webSocket?: WebSocket;
+}

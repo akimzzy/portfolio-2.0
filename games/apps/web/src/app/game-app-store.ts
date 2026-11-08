@@ -1,4 +1,4 @@
-export type GameScreen = 'lobby' | 'match' | 'opening';
+export type GameScreen = "lobby" | "match" | "opening";
 export type ActiveMatchSummary = Readonly<{
   pending: boolean;
   gameId: string;
@@ -7,20 +7,25 @@ export type ActiveMatchSummary = Readonly<{
   statusLabel: string;
 }> | null;
 export type OpeningMatchView = Readonly<{
-  status: 'loading' | 'error';
+  status: "loading" | "error";
   title: string;
   message: string;
-  action: 'retry' | 'reload' | null;
+  action: "retry" | "reload" | null;
 }>;
-export type CountdownView = Readonly<{ deadline: number; clockOffset: number; context: string; urgent?: boolean }>;
+export type CountdownView = Readonly<{
+  deadline: number;
+  clockOffset: number;
+  context: string;
+  urgent?: boolean;
+}>;
 
 export type GameAppSnapshot = Readonly<{
   screen: GameScreen;
-  lobbyTab: 'matches' | 'games';
+  lobbyTab: "matches" | "games" | "leaderboard";
   lobbyTabFocusRequest: boolean;
   title: string;
   description: string;
-  theme: 'system' | 'light' | 'dark';
+  theme: "system" | "light" | "dark";
   soundEnabled: boolean;
   announcement: string;
   activeMatch: ActiveMatchSummary;
@@ -55,33 +60,33 @@ export type GameAppSnapshot = Readonly<{
 }>;
 
 const initialSnapshot: GameAppSnapshot = {
-  screen: 'lobby',
-  lobbyTab: 'matches',
+  screen: "lobby",
+  lobbyTab: "matches",
   lobbyTabFocusRequest: false,
-  title: 'Games',
-  description: '',
-  theme: 'system',
+  title: "Games",
+  description: "",
+  theme: "system",
   soundEnabled: true,
-  announcement: '',
+  announcement: "",
   activeMatch: null,
   resumingMatch: false,
   onlineSetupOpen: false,
   openingMatch: null,
-  lobbyError: '',
+  lobbyError: "",
   controls: {
     homeVisible: false,
     newGameVisible: false,
     newGameDisabled: false,
     playOnlineVisible: false,
     playOnlineDisabled: false,
-    playOnlineLabel: 'Play online',
-    playOnlineTitle: 'Create or join an online game',
+    playOnlineLabel: "Play online",
+    playOnlineTitle: "Create or join an online game",
     soundVisible: false,
   },
   connection: {
     visible: false,
     connected: false,
-    status: '',
+    status: "",
     roomExpiry: null,
     reconnect: null,
     shareVisible: false,

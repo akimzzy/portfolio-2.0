@@ -8,57 +8,308 @@ const now = 1_800_000_000_000;
 
 function makeMatch({ firstDeadline, secondDeadline }) {
   return {
-    id: "abcdefghijklmnopqrstuv", visibility: "public", status: "between-games",
-    createdAt: now - 60_000, expiresAt: now + 60_000, revision: 8,
+    id: "abcdefghijklmnopqrstuv",
+    visibility: "public",
+    status: "between-games",
+    createdAt: now - 60_000,
+    expiresAt: now + 60_000,
+    revision: 8,
     state: createGame("first"),
     seats: [
-      { tokenHash: "first-hash", connected: false, reconnectRemainingMs: firstDeadline, disconnectedAt: now },
-      { tokenHash: "second-hash", connected: false, reconnectRemainingMs: secondDeadline, disconnectedAt: now },
+      {
+        tokenHash: "first-hash",
+        connected: false,
+        reconnectRemainingMs: firstDeadline,
+        disconnectedAt: now,
+      },
+      {
+        tokenHash: "second-hash",
+        connected: false,
+        reconnectRemainingMs: secondDeadline,
+        disconnectedAt: now,
+      },
     ],
-    countdownAt: null, turnDeadline: null, turnStartedAt: null, nextGameDeadline: now + 30_000,
-    reconnectSeat: null, reconnectDeadline: null, pausedTurnMs: null,
-    outcome: null, recentActions: {}, actionTimes: [[], []],
-    seriesTarget: 2, wins: { first: 1, second: 0 }, gameNumber: 2,
-    seriesStartingSeat: "first", nextStartingSeat: "second",
-    nextReady: [false, false], rematchReady: [false, false], closedSeats: [false, false],
-    rematchCountdown: false, seriesWinner: null,
+    countdownAt: null,
+    turnDeadline: null,
+    turnStartedAt: null,
+    nextGameDeadline: now + 30_000,
+    reconnectSeat: null,
+    reconnectDeadline: null,
+    pausedTurnMs: null,
+    outcome: null,
+    recentActions: {},
+    actionTimes: [[], []],
+    seriesTarget: 2,
+    wins: { first: 1, second: 0 },
+    gameNumber: 2,
+    seriesStartingSeat: "first",
+    nextStartingSeat: "second",
+    nextReady: [false, false],
+    rematchReady: [false, false],
+    closedSeats: [false, false],
+    rematchCountdown: false,
+    seriesWinner: null,
   };
 }
 
 function makeWaitingMatch(seatToken, expiresAt = now) {
   return {
-    id: "abcdefghijklmnopqrstuv", visibility: "public", status: "waiting",
-    createdAt: now - 60_000, expiresAt, revision: 2, state: null,
+    id: "abcdefghijklmnopqrstuv",
+    visibility: "public",
+    status: "waiting",
+    createdAt: now - 60_000,
+    expiresAt,
+    revision: 2,
+    state: null,
     seats: [
-      { tokenHash: createHash("sha256").update(seatToken).digest("hex"), displayName: "Host", connected: false, reconnectRemainingMs: 60_000, disconnectedAt: null },
+      {
+        tokenHash: createHash("sha256").update(seatToken).digest("hex"),
+        displayName: "Host",
+        connected: false,
+        reconnectRemainingMs: 60_000,
+        disconnectedAt: null,
+      },
       null,
     ],
-    countdownAt: null, turnDeadline: null, turnStartedAt: null, nextGameDeadline: null,
-    reconnectSeat: null, reconnectDeadline: null, pausedTurnMs: null, outcome: null,
-    recentActions: {}, actionTimes: [[], []], seriesTarget: 2, wins: { first: 0, second: 0 },
-    gameNumber: 0, seriesStartingSeat: null, nextStartingSeat: null, nextReady: [false, false],
-    rematchReady: [false, false], closedSeats: [false, false], rematchCountdown: false, seriesWinner: null,
+    countdownAt: null,
+    turnDeadline: null,
+    turnStartedAt: null,
+    nextGameDeadline: null,
+    reconnectSeat: null,
+    reconnectDeadline: null,
+    pausedTurnMs: null,
+    outcome: null,
+    recentActions: {},
+    actionTimes: [[], []],
+    seriesTarget: 2,
+    wins: { first: 0, second: 0 },
+    gameNumber: 0,
+    seriesStartingSeat: null,
+    nextStartingSeat: null,
+    nextReady: [false, false],
+    rematchReady: [false, false],
+    closedSeats: [false, false],
+    rematchCountdown: false,
+    seriesWinner: null,
   };
 }
 
-function makeObject(match, sockets = []) {
+function makeObject(match, sockets = [], env = {}) {
   const values = new Map([["match", match]]);
+  const background = [];
   const storage = {
-    async get(key) { return values.get(key); },
-    async getAlarm() { return this.alarmAt ?? null; },
-    async put(key, value) { values.set(key, structuredClone(value)); },
-    async deleteAll() { values.clear(); this.alarmAt = null; },
-    async setAlarm(value) { this.alarmAt = value instanceof Date ? value.getTime() : value; },
-    async deleteAlarm() { this.alarmAt = null; },
+    async get(key) {
+      return values.get(key);
+    },
+    async getAlarm() {
+      return this.alarmAt ?? null;
+    },
+    async put(key, value) {
+      values.set(key, structuredClone(value));
+    },
+    async deleteAll() {
+      values.clear();
+      this.alarmAt = null;
+    },
+    async setAlarm(value) {
+      this.alarmAt = value instanceof Date ? value.getTime() : value;
+    },
+    async deleteAlarm() {
+      this.alarmAt = null;
+    },
   };
-  const ctx = { storage, getWebSockets: () => sockets, acceptWebSocket() {}, waitUntil() {} };
-  return { object: new MatchDurableObject(ctx, {}), storage, values };
+  const ctx = {
+    storage,
+    getWebSockets: () => sockets,
+    acceptWebSocket() {},
+    waitUntil(promise) {
+      background.push(promise);
+    },
+  };
+  return { object: new MatchDurableObject(ctx, env), storage, values, background };
 }
+
+function makeCompletedAccountMatch() {
+  const firstToken = "first-seat-token";
+  const secondToken = "second-seat-token";
+  return {
+    ...makeMatch({ firstDeadline: 60_000, secondDeadline: 60_000 }),
+    status: "completed",
+    visibility: "invite",
+    seriesTarget: 1,
+    seriesNumber: 1,
+    gameNumber: 1,
+    wins: { first: 1, second: 0 },
+    seriesWinner: "first",
+    seriesCompletedAt: now,
+    retentionDeadline: now + 24 * 60 * 60_000,
+    roundHistory: [],
+    seats: [
+      {
+        tokenHash: createHash("sha256").update(firstToken).digest("hex"),
+        accountId: "7f25c8d9-07b8-4e2c-9fc1-288019d41f4b",
+        displayName: "FirstPlayer",
+        connected: false,
+        reconnectRemainingMs: 60_000,
+        disconnectedAt: null,
+      },
+      {
+        tokenHash: createHash("sha256").update(secondToken).digest("hex"),
+        accountId: "8f25c8d9-07b8-4e2c-9fc1-288019d41f4b",
+        displayName: "SecondPlayer",
+        connected: false,
+        reconnectRemainingMs: 60_000,
+        disconnectedAt: null,
+      },
+    ],
+  };
+}
+
+async function readCompletedMatch(object) {
+  return object.fetch(
+    new Request("https://match.internal/snapshot", {
+      headers: { Authorization: "Bearer first-seat-token" },
+    }),
+  );
+}
+
+async function drainBackground(background) {
+  while (background.length) await Promise.allSettled(background.splice(0));
+}
+
+test("summary fallback keeps the durable outbox pending until replay rows can be saved", async () => {
+  const originalFetch = globalThis.fetch;
+  const historyCalls = [];
+  let historyPayload;
+  globalThis.fetch = async (input, init) => {
+    const url = new URL(input);
+    if (url.pathname.endsWith("/release_in_house_player")) return Response.json(false);
+    if (url.pathname.endsWith("/record_match_series_with_rounds")) {
+      historyCalls.push("with-rounds");
+      historyPayload = init?.body;
+      return Response.json({ code: "PGRST202" }, { status: 404 });
+    }
+    if (url.pathname.endsWith("/record_match_series")) {
+      historyCalls.push("legacy");
+      return new Response(null, { status: 204 });
+    }
+    return Response.json({ error: "unexpected-rpc" }, { status: 404 });
+  };
+
+  try {
+    const { object, values, background } = makeObject(makeCompletedAccountMatch(), [], {
+      SUPABASE_URL: "https://games.example.test",
+      SUPABASE_SECRET_KEY: "sb_secret_test",
+    });
+    const attemptStartedAt = Date.now();
+    const result = await readCompletedMatch(object);
+    assert.equal(result.status, 200);
+    await drainBackground(background);
+
+    const saved = values.get("match");
+    assert.deepEqual(historyCalls, ["with-rounds", "legacy"]);
+    const payload = JSON.parse(historyPayload).result_payload;
+    assert.equal(payload.visibility, "invite");
+    assert.deepEqual(
+      payload.players.map((player) => player.player_id),
+      [
+        "user:7f25c8d9-07b8-4e2c-9fc1-288019d41f4b",
+        "user:8f25c8d9-07b8-4e2c-9fc1-288019d41f4b",
+      ],
+    );
+    assert.equal(saved.persistedSeriesNumber, 0);
+    assert.equal(saved.historyOutbox.length, 1);
+    assert.equal(saved.historyOutbox[0].attempts, 1);
+    assert.ok(saved.historyOutbox[0].retryAt > attemptStartedAt);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("terminal match data stays in Durable Object storage until history is acknowledged", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (input) => {
+    const url = new URL(input);
+    if (url.pathname.endsWith("/release_in_house_player")) return Response.json(false);
+    return Response.json({ code: "database-unavailable" }, { status: 503 });
+  };
+
+  try {
+    const { object, values, background } = makeObject(makeCompletedAccountMatch(), [], {
+      SUPABASE_URL: "https://games.example.test",
+      SUPABASE_SECRET_KEY: "sb_secret_test",
+    });
+    await atTime(now, () => readCompletedMatch(object));
+    await drainBackground(background);
+
+    await atTime(now + 24 * 60 * 60_000 + 1_000, () => object.alarm());
+    await drainBackground(background);
+
+    const saved = values.get("match");
+    assert.ok(saved);
+    assert.equal(saved.persistedSeriesNumber, 0);
+    assert.equal(saved.historyOutbox.length, 1);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("history alarms process the earliest due series without waiting for older backoff", async () => {
+  const originalFetch = globalThis.fetch;
+  const persistedSeries = [];
+  globalThis.fetch = async (input, init) => {
+    const url = new URL(input);
+    if (url.pathname.endsWith("/release_in_house_player")) return Response.json(false);
+    if (url.pathname.endsWith("/record_match_series_with_rounds")) {
+      persistedSeries.push(JSON.parse(init?.body).result_payload.series_number);
+      return new Response(null, { status: 204 });
+    }
+    return Response.json({ error: "unexpected-rpc" }, { status: 404 });
+  };
+
+  try {
+    const match = makeCompletedAccountMatch();
+    match.persistedSeriesNumber = 0;
+    match.historyOutbox = [
+      {
+        seriesNumber: 1,
+        payload: { series_number: 1 },
+        attempts: 3,
+        retryAt: now + 60 * 60_000,
+      },
+      {
+        seriesNumber: 2,
+        payload: { series_number: 2 },
+        attempts: 0,
+        retryAt: now,
+      },
+    ];
+    const { object, values, background } = makeObject(match, [], {
+      SUPABASE_URL: "https://games.example.test",
+      SUPABASE_SECRET_KEY: "sb_secret_test",
+    });
+
+    await atTime(now, () => object.alarm());
+    await drainBackground(background);
+
+    assert.deepEqual(persistedSeries, [2]);
+    assert.deepEqual(
+      values.get("match").historyOutbox.map((entry) => entry.seriesNumber),
+      [1],
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
 
 async function atTime(time, callback) {
   const originalNow = Date.now;
   Date.now = () => time;
-  try { return await callback(); } finally { Date.now = originalNow; }
+  try {
+    return await callback();
+  } finally {
+    Date.now = originalNow;
+  }
 }
 
 test("one expired intermission reconnect window concedes the series to the other seat", async () => {
@@ -90,9 +341,18 @@ test("simultaneous intermission reconnect expiry cancels the series without a wi
 test("a due public fallback fills the open seat and uses the normal ready countdown", async () => {
   const match = {
     ...makeWaitingMatch("first-seat-token", now + 5 * 60_000),
-    gameId: "connect-four", rulesVersion: 2, aiFallbackAt: now,
+    gameId: "connect-four",
+    rulesVersion: 2,
+    aiFallbackAt: now,
     seats: [
-      { tokenHash: "first-hash", kind: "human", displayName: "Host", connected: true, reconnectRemainingMs: 60_000, disconnectedAt: null },
+      {
+        tokenHash: "first-hash",
+        kind: "human",
+        displayName: "Host",
+        connected: true,
+        reconnectRemainingMs: 60_000,
+        disconnectedAt: null,
+      },
       null,
     ],
   };
@@ -111,14 +371,21 @@ test("leaving during a mutual-rematch countdown cancels only that rematch", asyn
   const seatToken = "first-seat-token";
   const match = {
     ...makeMatch({ firstDeadline: 60_000, secondDeadline: 60_000 }),
-    status: "countdown", countdownAt: now + 2_000, rematchCountdown: true,
-    rematchReady: [true, true], seriesWinner: "first", outcome: "win-first",
+    status: "countdown",
+    countdownAt: now + 2_000,
+    rematchCountdown: true,
+    rematchReady: [true, true],
+    seriesWinner: "first",
+    outcome: "win-first",
   };
   match.seats[0].tokenHash = createHash("sha256").update(seatToken).digest("hex");
   const { object, values } = makeObject(match);
-  const response = await object.fetch(new Request("https://match.internal/leave-series", {
-    method: "POST", headers: { Authorization: `Bearer ${seatToken}` },
-  }));
+  const response = await object.fetch(
+    new Request("https://match.internal/leave-series", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${seatToken}` },
+    }),
+  );
 
   assert.equal(response.status, 200);
   const result = values.get("match");
@@ -135,20 +402,33 @@ test("leaving a completed series cannot race with a rematch request", async () =
     const firstToken = `first-${order}`;
     const match = {
       ...makeMatch({ firstDeadline: 60_000, secondDeadline: 60_000 }),
-      status: "completed", outcome: "win-first", seriesWinner: "first", nextGameDeadline: null,
+      status: "completed",
+      outcome: "win-first",
+      seriesWinner: "first",
+      nextGameDeadline: null,
     };
     match.seats[0].tokenHash = createHash("sha256").update(firstToken).digest("hex");
     const { object, values } = makeObject(match);
     const secondSocket = {
       attachment: { authenticated: true, seat: "second" },
-      deserializeAttachment() { return this.attachment; },
-      serializeAttachment(value) { this.attachment = structuredClone(value); },
-      send() {}, close() {},
+      deserializeAttachment() {
+        return this.attachment;
+      },
+      serializeAttachment(value) {
+        this.attachment = structuredClone(value);
+      },
+      send() {},
+      close() {},
     };
-    const leave = () => object.fetch(new Request("https://match.internal/leave-series", {
-      method: "POST", headers: { Authorization: `Bearer ${firstToken}` },
-    }));
-    const rematch = () => object.webSocketMessage(secondSocket, JSON.stringify({ type: "rematch" }));
+    const leave = () =>
+      object.fetch(
+        new Request("https://match.internal/leave-series", {
+          method: "POST",
+          headers: { Authorization: `Bearer ${firstToken}` },
+        }),
+      );
+    const rematch = () =>
+      object.webSocketMessage(secondSocket, JSON.stringify({ type: "rematch" }));
 
     await Promise.all(order === "leave-first" ? [leave(), rematch()] : [rematch(), leave()]);
 
@@ -165,13 +445,21 @@ test("a late host socket authentication expires the waiting room instead of star
   const socket = {
     attachment: { authenticated: false, authDeadline: now + 10_000 },
     closed: null,
-    deserializeAttachment() { return this.attachment; },
-    serializeAttachment(value) { this.attachment = structuredClone(value); },
+    deserializeAttachment() {
+      return this.attachment;
+    },
+    serializeAttachment(value) {
+      this.attachment = structuredClone(value);
+    },
     send() {},
-    close(code, reason) { this.closed = { code, reason }; },
+    close(code, reason) {
+      this.closed = { code, reason };
+    },
   };
   const { object, values } = makeObject(match, [socket]);
-  await atTime(now + 1, () => object.webSocketMessage(socket, JSON.stringify({ type: "authenticate", seatToken })));
+  await atTime(now + 1, () =>
+    object.webSocketMessage(socket, JSON.stringify({ type: "authenticate", seatToken })),
+  );
 
   const expired = values.get("match");
   assert.equal(expired.status, "expired");
@@ -184,10 +472,13 @@ test("a late host socket authentication expires the waiting room instead of star
 test("an authenticated room snapshot observes expiry even when its alarm has not run", async () => {
   const seatToken = "host-seat-token";
   const { object, values } = makeObject(makeWaitingMatch(seatToken));
-  const response = await atTime(now + 1, () => object.fetch(new Request(
-    "https://match.internal/snapshot",
-    { headers: { Authorization: `Bearer ${seatToken}` } },
-  )));
+  const response = await atTime(now + 1, () =>
+    object.fetch(
+      new Request("https://match.internal/snapshot", {
+        headers: { Authorization: `Bearer ${seatToken}` },
+      }),
+    ),
+  );
 
   assert.equal(response.status, 200);
   assert.equal((await response.json()).status, "expired");
@@ -231,8 +522,18 @@ test("a legacy active match with no turn deadline is repaired and scheduled in t
     reconnectDeadline: null,
     pausedTurnMs: null,
     seats: [
-      { tokenHash: "first-hash", connected: true, reconnectRemainingMs: 60_000, disconnectedAt: null },
-      { tokenHash: "second-hash", connected: true, reconnectRemainingMs: 60_000, disconnectedAt: null },
+      {
+        tokenHash: "first-hash",
+        connected: true,
+        reconnectRemainingMs: 60_000,
+        disconnectedAt: null,
+      },
+      {
+        tokenHash: "second-hash",
+        connected: true,
+        reconnectRemainingMs: 60_000,
+        disconnectedAt: null,
+      },
     ],
   };
   const { object, values, storage } = makeObject(match);
@@ -250,11 +551,24 @@ test("a legacy active match with no turn deadline is repaired and scheduled in t
 test("an older client starts its turn clock without a receipt handshake", async () => {
   const match = {
     ...makeMatch({ firstDeadline: 60_000, secondDeadline: 60_000 }),
-    status: "countdown", countdownAt: now, state: null, gameNumber: 0,
+    status: "countdown",
+    countdownAt: now,
+    state: null,
+    gameNumber: 0,
     nextStartingSeat: "first",
     seats: [
-      { tokenHash: "first-hash", connected: true, reconnectRemainingMs: 60_000, disconnectedAt: null },
-      { tokenHash: "second-hash", connected: true, reconnectRemainingMs: 60_000, disconnectedAt: null },
+      {
+        tokenHash: "first-hash",
+        connected: true,
+        reconnectRemainingMs: 60_000,
+        disconnectedAt: null,
+      },
+      {
+        tokenHash: "second-hash",
+        connected: true,
+        reconnectRemainingMs: 60_000,
+        disconnectedAt: null,
+      },
     ],
   };
   const { object, values } = makeObject(match);
@@ -286,8 +600,18 @@ test("the shared intermission deadline starts the next game even when neither pl
   const match = {
     ...makeMatch({ firstDeadline: 60_000, secondDeadline: 60_000 }),
     seats: [
-      { tokenHash: "first-hash", connected: true, reconnectRemainingMs: 60_000, disconnectedAt: null },
-      { tokenHash: "second-hash", connected: true, reconnectRemainingMs: 60_000, disconnectedAt: null },
+      {
+        tokenHash: "first-hash",
+        connected: true,
+        reconnectRemainingMs: 60_000,
+        disconnectedAt: null,
+      },
+      {
+        tokenHash: "second-hash",
+        connected: true,
+        reconnectRemainingMs: 60_000,
+        disconnectedAt: null,
+      },
     ],
     nextGameDeadline: now + 30_000,
   };
@@ -307,8 +631,18 @@ test("the other player's vote starts the next-game countdown before the shared d
   const match = {
     ...makeMatch({ firstDeadline: 60_000, secondDeadline: 60_000 }),
     seats: [
-      { tokenHash: "first-hash", connected: true, reconnectRemainingMs: 60_000, disconnectedAt: null },
-      { tokenHash: "second-hash", connected: true, reconnectRemainingMs: 60_000, disconnectedAt: null },
+      {
+        tokenHash: "first-hash",
+        connected: true,
+        reconnectRemainingMs: 60_000,
+        disconnectedAt: null,
+      },
+      {
+        tokenHash: "second-hash",
+        connected: true,
+        reconnectRemainingMs: 60_000,
+        disconnectedAt: null,
+      },
     ],
     nextGameDeadline: now + 30_000,
   };
@@ -329,8 +663,18 @@ test("the automatic next-game deadline waits for a disconnected player to reconn
   const match = {
     ...makeMatch({ firstDeadline: 60_000, secondDeadline: 60_000 }),
     seats: [
-      { tokenHash: "first-hash", connected: true, reconnectRemainingMs: 60_000, disconnectedAt: null },
-      { tokenHash: "second-hash", connected: false, reconnectRemainingMs: 60_000, disconnectedAt: now },
+      {
+        tokenHash: "first-hash",
+        connected: true,
+        reconnectRemainingMs: 60_000,
+        disconnectedAt: null,
+      },
+      {
+        tokenHash: "second-hash",
+        connected: false,
+        reconnectRemainingMs: 60_000,
+        disconnectedAt: now,
+      },
     ],
     nextGameDeadline: now + 30_000,
   };
@@ -347,8 +691,18 @@ test("two saved readiness votes do not bypass the connected-player requirement",
   const match = {
     ...makeMatch({ firstDeadline: 60_000, secondDeadline: 60_000 }),
     seats: [
-      { tokenHash: "first-hash", connected: true, reconnectRemainingMs: 60_000, disconnectedAt: null },
-      { tokenHash: "second-hash", connected: false, reconnectRemainingMs: 60_000, disconnectedAt: now },
+      {
+        tokenHash: "first-hash",
+        connected: true,
+        reconnectRemainingMs: 60_000,
+        disconnectedAt: null,
+      },
+      {
+        tokenHash: "second-hash",
+        connected: false,
+        reconnectRemainingMs: 60_000,
+        disconnectedAt: now,
+      },
     ],
     nextReady: [false, true],
     nextGameDeadline: now + 30_000,
@@ -366,21 +720,37 @@ test("a player who reconnects after the shared deadline starts the next-game cou
   const match = {
     ...makeMatch({ firstDeadline: 60_000, secondDeadline: 60_000 }),
     seats: [
-      { tokenHash: "first-hash", connected: true, reconnectRemainingMs: 60_000, disconnectedAt: null },
-      { tokenHash: "second-hash", connected: false, reconnectRemainingMs: 60_000, disconnectedAt: now },
+      {
+        tokenHash: "first-hash",
+        connected: true,
+        reconnectRemainingMs: 60_000,
+        disconnectedAt: null,
+      },
+      {
+        tokenHash: "second-hash",
+        connected: false,
+        reconnectRemainingMs: 60_000,
+        disconnectedAt: now,
+      },
     ],
     nextGameDeadline: now + 30_000,
   };
   const socket = {
     deserializeAttachment: () => ({ authenticated: false, authDeadline: now + 60_000 }),
-    serializeAttachment() {}, send() {}, close() {},
+    serializeAttachment() {},
+    send() {},
+    close() {},
   };
   const { object, values, storage } = makeObject(match, [socket]);
   const seatToken = "reconnect-token";
   const encoder = new TextEncoder();
   const digest = await crypto.subtle.digest("SHA-256", encoder.encode(seatToken));
-  values.get("match").seats[1].tokenHash = [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
-  await atTime(now + 40_000, () => object.webSocketMessage(socket, JSON.stringify({ type: "authenticate", seatToken })));
+  values.get("match").seats[1].tokenHash = [...new Uint8Array(digest)]
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+  await atTime(now + 40_000, () =>
+    object.webSocketMessage(socket, JSON.stringify({ type: "authenticate", seatToken })),
+  );
 
   const result = values.get("match");
   assert.equal(result.status, "countdown");
@@ -393,9 +763,14 @@ test("a player who reconnects after the shared deadline starts the next-game cou
 test("turn expiry forfeits only the current game and awards one series point", async () => {
   const match = {
     ...makeMatch({ firstDeadline: 60_000, secondDeadline: 60_000 }),
-    status: "active", turnDeadline: now + 5_000, turnStartedAt: now,
-    reconnectSeat: null, reconnectDeadline: null, pausedTurnMs: null,
-    wins: { first: 1, second: 0 }, seriesWinner: null,
+    status: "active",
+    turnDeadline: now + 5_000,
+    turnStartedAt: now,
+    reconnectSeat: null,
+    reconnectDeadline: null,
+    pausedTurnMs: null,
+    wins: { first: 1, second: 0 },
+    seriesWinner: null,
   };
   const { object, values } = makeObject(match);
   await atTime(now + 5_000, () => object.alarm());
@@ -410,11 +785,25 @@ test("turn expiry forfeits only the current game and awards one series point", a
 test("active reconnect expiry forfeits the current game and leaves the series score consistent", async () => {
   const match = {
     ...makeMatch({ firstDeadline: 5_000, secondDeadline: 60_000 }),
-    status: "active", turnDeadline: null, turnStartedAt: now - 5_000,
-    reconnectSeat: "first", reconnectDeadline: now + 5_000, pausedTurnMs: 18_000,
+    status: "active",
+    turnDeadline: null,
+    turnStartedAt: now - 5_000,
+    reconnectSeat: "first",
+    reconnectDeadline: now + 5_000,
+    pausedTurnMs: 18_000,
     seats: [
-      { tokenHash: "first-hash", connected: false, reconnectRemainingMs: 5_000, disconnectedAt: now },
-      { tokenHash: "second-hash", connected: true, reconnectRemainingMs: 60_000, disconnectedAt: null },
+      {
+        tokenHash: "first-hash",
+        connected: false,
+        reconnectRemainingMs: 5_000,
+        disconnectedAt: now,
+      },
+      {
+        tokenHash: "second-hash",
+        connected: true,
+        reconnectRemainingMs: 60_000,
+        disconnectedAt: null,
+      },
     ],
   };
   const { object, values } = makeObject(match);
@@ -430,12 +819,26 @@ test("active reconnect expiry forfeits the current game and leaves the series sc
 test("a turn that is never acknowledged expires within the recipient's reconnect budget", async () => {
   const match = {
     ...makeMatch({ firstDeadline: 5_000, secondDeadline: 60_000 }),
-    status: "active", turnDeadline: null, turnStartedAt: null,
-    reconnectSeat: "first", reconnectDeadline: now + 5_000, pausedTurnMs: 45_000,
+    status: "active",
+    turnDeadline: null,
+    turnStartedAt: null,
+    reconnectSeat: "first",
+    reconnectDeadline: now + 5_000,
+    pausedTurnMs: 45_000,
     turnReceiptPending: true,
     seats: [
-      { tokenHash: "first-hash", connected: true, reconnectRemainingMs: 5_000, disconnectedAt: null },
-      { tokenHash: "second-hash", connected: true, reconnectRemainingMs: 60_000, disconnectedAt: null },
+      {
+        tokenHash: "first-hash",
+        connected: true,
+        reconnectRemainingMs: 5_000,
+        disconnectedAt: null,
+      },
+      {
+        tokenHash: "second-hash",
+        connected: true,
+        reconnectRemainingMs: 60_000,
+        disconnectedAt: null,
+      },
     ],
   };
   const { object, values } = makeObject(match);
@@ -452,25 +855,47 @@ test("a move at the deadline loses to timeout, while an earlier accepted move re
   function makeActiveHarness() {
     const match = {
       ...makeMatch({ firstDeadline: 60_000, secondDeadline: 60_000 }),
-      status: "active", turnDeadline: now + 5_000, turnStartedAt: now,
+      status: "active",
+      turnDeadline: now + 5_000,
+      turnStartedAt: now,
       seats: [
-        { tokenHash: "first-hash", connected: true, reconnectRemainingMs: 60_000, disconnectedAt: null },
-      { tokenHash: "second-hash", connected: true, reconnectRemainingMs: 60_000, disconnectedAt: null, turnReceiptSupported: true },
+        {
+          tokenHash: "first-hash",
+          connected: true,
+          reconnectRemainingMs: 60_000,
+          disconnectedAt: null,
+        },
+        {
+          tokenHash: "second-hash",
+          connected: true,
+          reconnectRemainingMs: 60_000,
+          disconnectedAt: null,
+          turnReceiptSupported: true,
+        },
       ],
     };
     const messages = [];
     const socket = {
       deserializeAttachment: () => ({ authenticated: true, seat: "first" }),
-      serializeAttachment() {}, send: (message) => messages.push(JSON.parse(message)), close() {},
+      serializeAttachment() {},
+      send: (message) => messages.push(JSON.parse(message)),
+      close() {},
     };
     const nextPlayerSocket = {
       deserializeAttachment: () => ({ authenticated: true, seat: "second" }),
-      serializeAttachment() {}, send: (message) => messages.push(JSON.parse(message)), close() {},
+      serializeAttachment() {},
+      send: (message) => messages.push(JSON.parse(message)),
+      close() {},
     };
     const harness = makeObject(match, [socket, nextPlayerSocket]);
     const command = {
-      protocolVersion: 1, gameId: "connect-four", rulesVersion: 1, type: "submit-action",
-      matchId: match.id, actionId: "deadline-race-1", expectedRevision: match.revision,
+      protocolVersion: 1,
+      gameId: "connect-four",
+      rulesVersion: 1,
+      type: "submit-action",
+      matchId: match.id,
+      actionId: "deadline-race-1",
+      expectedRevision: match.revision,
       action: { type: "drop-token", column: 3 },
     };
     return { ...harness, messages, socket, nextPlayerSocket, command };
@@ -481,13 +906,20 @@ test("a move at the deadline loses to timeout, while an earlier accepted move re
     await atDeadline.object.webSocketMessage(atDeadline.socket, JSON.stringify(atDeadline.command));
     await atDeadline.object.alarm();
   });
-  assert.ok(atDeadline.messages.some((message) => message.type === "action-rejected" && message.code === "match-not-active"));
+  assert.ok(
+    atDeadline.messages.some(
+      (message) => message.type === "action-rejected" && message.code === "match-not-active",
+    ),
+  );
   assert.equal(atDeadline.values.get("match").status, "between-games");
   assert.equal(atDeadline.values.get("match").state.moves.length, 0);
 
   const beforeDeadline = makeActiveHarness();
   await atTime(now + 4_999, async () => {
-    await beforeDeadline.object.webSocketMessage(beforeDeadline.socket, JSON.stringify(beforeDeadline.command));
+    await beforeDeadline.object.webSocketMessage(
+      beforeDeadline.socket,
+      JSON.stringify(beforeDeadline.command),
+    );
     await beforeDeadline.object.alarm();
   });
   const accepted = beforeDeadline.values.get("match");
@@ -496,10 +928,12 @@ test("a move at the deadline loses to timeout, while an earlier accepted move re
   assert.equal(accepted.turnDeadline, null);
   assert.equal(accepted.turnReceiptPending, true);
   assert.equal(accepted.reconnectSeat, "second");
-  await atTime(now + 10_000, () => beforeDeadline.object.webSocketMessage(
-    beforeDeadline.nextPlayerSocket,
-    JSON.stringify({ type: "turn-received", revision: accepted.revision }),
-  ));
+  await atTime(now + 10_000, () =>
+    beforeDeadline.object.webSocketMessage(
+      beforeDeadline.nextPlayerSocket,
+      JSON.stringify({ type: "turn-received", revision: accepted.revision }),
+    ),
+  );
   const acknowledged = beforeDeadline.values.get("match");
   assert.equal(acknowledged.turnReceiptPending, false);
   assert.equal(acknowledged.turnDeadline, now + 10_000 + 45_000);
@@ -509,26 +943,29 @@ test("a move at the deadline loses to timeout, while an earlier accepted move re
   const disconnectedSeat = disconnectedRecipient.values.get("match").seats[1];
   disconnectedSeat.connected = false;
   disconnectedSeat.disconnectedAt = now - 30_000;
-  await atTime(now + 4_999, () => disconnectedRecipient.object.webSocketMessage(
-    disconnectedRecipient.socket,
-    JSON.stringify(disconnectedRecipient.command),
-  ));
+  await atTime(now + 4_999, () =>
+    disconnectedRecipient.object.webSocketMessage(
+      disconnectedRecipient.socket,
+      JSON.stringify(disconnectedRecipient.command),
+    ),
+  );
   const disconnectedMove = disconnectedRecipient.values.get("match");
   assert.equal(disconnectedMove.turnReceiptStartedAt, now + 4_999);
-  await atTime(now + 10_000, () => disconnectedRecipient.object.webSocketMessage(
-    disconnectedRecipient.nextPlayerSocket,
-    JSON.stringify({ type: "turn-received", revision: disconnectedMove.revision }),
-  ));
+  await atTime(now + 10_000, () =>
+    disconnectedRecipient.object.webSocketMessage(
+      disconnectedRecipient.nextPlayerSocket,
+      JSON.stringify({ type: "turn-received", revision: disconnectedMove.revision }),
+    ),
+  );
   const reconnectedRecipient = disconnectedRecipient.values.get("match");
   assert.equal(reconnectedRecipient.seats[1].reconnectRemainingMs, 54_999);
   assert.equal(reconnectedRecipient.seats[1].disconnectedAt, null);
 
   const legacyClient = makeActiveHarness();
   legacyClient.values.get("match").seats[1].turnReceiptSupported = false;
-  await atTime(now + 4_999, () => legacyClient.object.webSocketMessage(
-    legacyClient.socket,
-    JSON.stringify(legacyClient.command),
-  ));
+  await atTime(now + 4_999, () =>
+    legacyClient.object.webSocketMessage(legacyClient.socket, JSON.stringify(legacyClient.command)),
+  );
   const legacyAccepted = legacyClient.values.get("match");
   assert.equal(legacyAccepted.turnReceiptPending, false);
   assert.equal(legacyAccepted.turnDeadline, now + 4_999 + 45_000);
@@ -537,7 +974,8 @@ test("a move at the deadline loses to timeout, while an earlier accepted move re
 test("terminal match data is removed after its retention deadline", async () => {
   const match = {
     ...makeMatch({ firstDeadline: 0, secondDeadline: 0 }),
-    status: "completed", retentionDeadline: now + 24 * 60 * 60_000,
+    status: "completed",
+    retentionDeadline: now + 24 * 60 * 60_000,
     seriesWinner: "first",
   };
   const { object, values, storage } = makeObject(match);

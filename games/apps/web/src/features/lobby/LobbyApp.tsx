@@ -11,16 +11,13 @@ import type { GameController } from "../../app/controller-contract";
 import { showDialogWithoutActionFocus } from "../../shared/show-dialog";
 import { Button } from "../../components/Button";
 import { GameHowToPlay, type GameId } from "../match/GameHowToPlay";
+import { LeaderboardPanel } from "./LeaderboardPanel";
 
 function seriesLabel(target: number): string {
   return target === 1 ? "One game" : `First to win ${target}`;
 }
 
-export default function LobbyApp({
-  controller,
-}: {
-  controller: GameController;
-}) {
+export default function LobbyApp({ controller }: { controller: GameController }) {
   const app = useSyncExternalStore(
     controller.store.subscribe,
     controller.store.getSnapshot,
@@ -39,8 +36,7 @@ export default function LobbyApp({
   const filter = lobbyState.filter;
 
   useEffect(() => {
-    const onVisibility = () =>
-      lobbyClient.setPageVisible(document.visibilityState === "visible");
+    const onVisibility = () => lobbyClient.setPageVisible(document.visibilityState === "visible");
     lobbyClient.setVisible(true);
     lobbyClient.setPageVisible(document.visibilityState === "visible");
     document.addEventListener("visibilitychange", onVisibility);
@@ -52,18 +48,25 @@ export default function LobbyApp({
 
   useEffect(() => {
     if (app.lobbyTabFocusRequest) {
-      tabRefs.current[tab === "matches" ? 0 : 1]?.focus();
+      tabRefs.current[tab === "games" ? 1 : 0]?.focus();
       controller.clearLobbyTabFocusRequest();
     }
   }, [app.lobbyTabFocusRequest, controller, tab]);
 
   useEffect(() => {
     const url = new URL(window.location.href);
-    if (tab === "games") url.searchParams.set("view", "games");
-    else url.searchParams.delete("view");
+    if (tab === "matches") {
+      url.searchParams.delete("view");
+      url.searchParams.delete("returnTab");
+    } else if (tab === "games") {
+      url.searchParams.set("view", "games");
+      url.searchParams.delete("returnTab");
+    } else {
+      url.searchParams.set("view", "leaderboard");
+    }
     if (filter === "all") url.searchParams.delete("lobbyGame");
     else url.searchParams.set("lobbyGame", filter);
-    history.replaceState(null, "", url);
+    history.replaceState(history.state, "", url);
   }, [tab, filter]);
 
   useEffect(() => {
@@ -88,10 +91,11 @@ export default function LobbyApp({
       showDialogWithoutActionFocus(dialogRef.current);
   };
   const onTabKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (tab === "leaderboard") return;
     const current = tab === "matches" ? 0 : 1;
     const next =
       event.key === "ArrowRight" || event.key === "ArrowLeft"
-        ? (current + 1) % 2
+        ? (current + (event.key === "ArrowRight" ? 1 : -1) + 2) % 2
         : event.key === "Home"
           ? 0
           : event.key === "End"
@@ -145,45 +149,47 @@ export default function LobbyApp({
         </aside>
       )}
 
-      <div className="lobby-navigation-row">
-        <nav
-          className="lobby-tabs"
-          role="tablist"
-          aria-label="Browse open matches or games"
-          onKeyDown={onTabKeyDown}
-        >
-          <button
-            ref={(node) => {
-              tabRefs.current[0] = node;
-            }}
-            className="lobby-tab"
-            id="matches-tab"
-            type="button"
-            role="tab"
-            aria-selected={tab === "matches"}
-            aria-controls="matches-panel"
-            tabIndex={tab === "matches" ? 0 : -1}
-            onClick={() => controller.setLobbyTab("matches")}
+      {tab !== "leaderboard" && (
+        <div className="lobby-navigation-row">
+          <nav
+            className="lobby-tabs"
+            role="tablist"
+            aria-label="Browse open matches and games"
+            onKeyDown={onTabKeyDown}
           >
-            Open matches
-          </button>
-          <button
-            ref={(node) => {
-              tabRefs.current[1] = node;
-            }}
-            className="lobby-tab"
-            id="games-tab"
-            type="button"
-            role="tab"
-            aria-selected={tab === "games"}
-            aria-controls="games-panel"
-            tabIndex={tab === "games" ? 0 : -1}
-            onClick={() => controller.setLobbyTab("games")}
-          >
-            Games
-          </button>
-        </nav>
-      </div>
+            <button
+              ref={(node) => {
+                tabRefs.current[0] = node;
+              }}
+              className="lobby-tab"
+              id="matches-tab"
+              type="button"
+              role="tab"
+              aria-selected={tab === "matches"}
+              aria-controls="matches-panel"
+              tabIndex={tab === "matches" ? 0 : -1}
+              onClick={() => controller.setLobbyTab("matches")}
+            >
+              Open matches
+            </button>
+            <button
+              ref={(node) => {
+                tabRefs.current[1] = node;
+              }}
+              className="lobby-tab"
+              id="games-tab"
+              type="button"
+              role="tab"
+              aria-selected={tab === "games"}
+              aria-controls="games-panel"
+              tabIndex={tab === "games" ? 0 : -1}
+              onClick={() => controller.setLobbyTab("games")}
+            >
+              Games
+            </button>
+          </nav>
+        </div>
+      )}
       {tab === "matches" && (
         <div className="lobby-filter-row">
           <Button
@@ -233,16 +239,11 @@ export default function LobbyApp({
           tabIndex={0}
           aria-label="Open matches for the selected game"
           aria-live="polite"
-          aria-busy={
-            !lobbyState.hasLoadedSnapshot &&
-            lobbyState.connection !== "connected"
-          }
+          aria-busy={!lobbyState.hasLoadedSnapshot && lobbyState.connection !== "connected"}
         >
           {filteredMatches.length === 0 && !lobbyState.hasLoadedSnapshot && (
             <p className="lobby-empty">
-              {lobbyState.connection === "reconnecting"
-                ? "Reconnecting…"
-                : "Loading matches…"}
+              {lobbyState.connection === "reconnecting" ? "Reconnecting…" : "Loading matches…"}
             </p>
           )}
           {showEmptyState && (
@@ -282,36 +283,37 @@ export default function LobbyApp({
               </article>
             );
           })}
-          {!lobbyState.hasMore && lobbyState.opponentOffers.map((opponent) => (
-            <article className="lobby-match-row" key={opponent.offerId}>
-              <div className="lobby-match-copy">
-                <strong>{opponent.displayName}</strong>
-                <span>
-                  {GAME_CATALOG.find((game) => game.id === opponent.gameId)
-                    ?.title ?? "Game"}{" "}
-                  · {seriesLabel(opponent.seriesTarget)}
-                </span>
-              </div>
-              <Button
-                className="lobby-join-button"
-                variant="secondary"
-                size="compact"
-                type="button"
-                aria-label={`Play ${GAME_CATALOG.find((game) => game.id === opponent.gameId)?.title ?? "game"} with ${opponent.displayName}`}
-                onClick={() => {
-                  controller.playOpponentMatch(
-                    opponent.gameId,
-                    opponent.profileId,
-                    opponent.displayName,
-                    opponent.seriesTarget,
-                  );
-                  lobbyClient.consumeOpponentOffer(opponent.offerId);
-                }}
-              >
-                Play
-              </Button>
-            </article>
-          ))}
+          {!lobbyState.hasMore &&
+            lobbyState.opponentOffers.map((opponent) => (
+              <article className="lobby-match-row" key={opponent.offerId}>
+                <div className="lobby-match-copy">
+                  <strong>{opponent.displayName}</strong>
+                  <span>
+                    {GAME_CATALOG.find((game) => game.id === opponent.gameId)?.title ?? "Game"} ·{" "}
+                    {seriesLabel(opponent.seriesTarget)}
+                  </span>
+                </div>
+                <Button
+                  className="lobby-join-button"
+                  variant="secondary"
+                  size="compact"
+                  type="button"
+                  aria-label={`Play ${GAME_CATALOG.find((game) => game.id === opponent.gameId)?.title ?? "game"} with ${opponent.displayName}`}
+                  onClick={() => {
+                    controller.playOpponentMatch(
+                      opponent.gameId,
+                      opponent.profileId,
+                      opponent.inHousePlayerId,
+                      opponent.displayName,
+                      opponent.seriesTarget,
+                    );
+                    lobbyClient.consumeOpponentOffer(opponent.offerId);
+                  }}
+                >
+                  Play
+                </Button>
+              </article>
+            ))}
         </div>
         {lobbyState.hasMore && (
           <Button
@@ -330,15 +332,21 @@ export default function LobbyApp({
           </p>
         )}
         {lobbyState.canReconnect && (
-          <button
-            className="lobby-reconnect"
-            type="button"
-            onClick={() => lobbyClient.retry()}
-          >
+          <button className="lobby-reconnect" type="button" onClick={() => lobbyClient.retry()}>
             Reconnect
           </button>
         )}
       </section>
+
+      {tab === "leaderboard" && (
+        <section
+          className="lobby-panel leaderboard-page"
+          id="leaderboard-panel"
+          aria-label="Leaderboard"
+        >
+          <LeaderboardPanel onBrowseGames={() => controller.setLobbyTab("games", true)} />
+        </section>
+      )}
 
       <section
         className="lobby-panel"
@@ -354,9 +362,7 @@ export default function LobbyApp({
                 <div className="game-catalog-copy">
                   <div className="game-catalog-title-line">
                     <h4>{game.title}</h4>
-                    <span className="game-catalog-meta">
-                      {game.playerCount}
-                    </span>
+                    <span className="game-catalog-meta">{game.playerCount}</span>
                     <button
                       className="game-guide-link"
                       type="button"
@@ -397,28 +403,28 @@ export default function LobbyApp({
               aria-label="Close filters"
               onClick={() => dialogRef.current?.close()}
             >
-              <svg aria-hidden="true" viewBox="0 0 20 20"><path d="m5 5 10 10M15 5 5 15" /></svg>
+              <svg aria-hidden="true" viewBox="0 0 20 20">
+                <path d="m5 5 10 10M15 5 5 15" />
+              </svg>
             </button>
           </div>
           <fieldset className="lobby-filter-options">
             <legend className="sr-only">Game</legend>
-            {[{ id: "all", title: "All games" }, ...GAME_CATALOG].map(
-              (game) => (
-                <label className="lobby-filter-option" key={game.id}>
-                  <input
-                    type="radio"
-                    name="lobby-game-filter"
-                    value={game.id}
-                    checked={filter === game.id}
-                    onChange={() => {
-                      lobbyClient.setFilter(game.id);
-                      dialogRef.current?.close("selected");
-                    }}
-                  />
-                  <span>{game.title}</span>
-                </label>
-              ),
-            )}
+            {[{ id: "all", title: "All games" }, ...GAME_CATALOG].map((game) => (
+              <label className="lobby-filter-option" key={game.id}>
+                <input
+                  type="radio"
+                  name="lobby-game-filter"
+                  value={game.id}
+                  checked={filter === game.id}
+                  onChange={() => {
+                    lobbyClient.setFilter(game.id);
+                    dialogRef.current?.close("selected");
+                  }}
+                />
+                <span>{game.title}</span>
+              </label>
+            ))}
           </fieldset>
         </div>
       </dialog>
@@ -445,7 +451,9 @@ export default function LobbyApp({
                 aria-label="Close game guide"
                 onClick={() => setGuideGameId(null)}
               >
-                <svg aria-hidden="true" viewBox="0 0 20 20"><path d="m5 5 10 10M15 5 5 15" /></svg>
+                <svg aria-hidden="true" viewBox="0 0 20 20">
+                  <path d="m5 5 10 10M15 5 5 15" />
+                </svg>
               </button>
             </div>
             <GameHowToPlay gameId={guideGameId} />

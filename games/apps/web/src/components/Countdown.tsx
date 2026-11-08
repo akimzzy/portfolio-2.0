@@ -1,5 +1,5 @@
-import { useEffect, useRef, useSyncExternalStore } from 'react';
-import { getClockSnapshot, subscribeClock } from '../shared/clock-store';
+import { useEffect, useRef, useSyncExternalStore } from "react";
+import { getClockSnapshot, subscribeClock } from "../shared/clock-store";
 
 type CountdownProps = Readonly<{
   deadline: number;
@@ -10,7 +10,13 @@ type CountdownProps = Readonly<{
 }>;
 
 /** Shared countdown display for turn, reconnect, room, and series deadlines. */
-export function Countdown({ deadline, clockOffset, context, urgent = false, onExpire }: CountdownProps) {
+export function Countdown({
+  deadline,
+  clockOffset,
+  context,
+  urgent = false,
+  onExpire,
+}: CountdownProps) {
   const now = useSyncExternalStore(subscribeClock, getClockSnapshot, getClockSnapshot);
   const seconds = Math.max(0, Math.ceil((deadline - (now + clockOffset)) / 1_000));
   const expiryHandled = useRef(false);
@@ -25,7 +31,7 @@ export function Countdown({ deadline, clockOffset, context, urgent = false, onEx
 
   return (
     <span
-      className={`countdown-indicator${urgent && seconds <= 10 ? ' is-urgent' : ''}`}
+      className={`countdown-indicator${urgent && seconds <= 10 ? " is-urgent" : ""}`}
       role="timer"
       aria-live="off"
       aria-label={`${seconds} seconds ${context}`}
