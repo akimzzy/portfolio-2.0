@@ -212,10 +212,7 @@ test("summary fallback keeps the durable outbox pending until replay rows can be
     assert.equal(payload.visibility, "invite");
     assert.deepEqual(
       payload.players.map((player) => player.player_id),
-      [
-        "user:7f25c8d9-07b8-4e2c-9fc1-288019d41f4b",
-        "user:8f25c8d9-07b8-4e2c-9fc1-288019d41f4b",
-      ],
+      ["user:7f25c8d9-07b8-4e2c-9fc1-288019d41f4b", "user:8f25c8d9-07b8-4e2c-9fc1-288019d41f4b"],
     );
     assert.equal(saved.persistedSeriesNumber, 0);
     assert.equal(saved.historyOutbox.length, 1);

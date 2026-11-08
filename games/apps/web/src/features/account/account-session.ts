@@ -484,15 +484,22 @@ export class AccountSession {
     this.historyMoreInFlight = null;
     const load = (async () => {
       try {
-        const selectHistory = (fields: string) => this.client!.from("game_history")
-          .select(fields, { count: "exact" })
-          .order("completed_at", { ascending: false })
-          .order("completion_id", { ascending: false })
-          .limit(HISTORY_INITIAL_LIMIT);
+        const selectHistory = (fields: string) =>
+          this.client!.from("game_history")
+            .select(fields, { count: "exact" })
+            .order("completed_at", { ascending: false })
+            .order("completion_id", { ascending: false })
+            .limit(HISTORY_INITIAL_LIMIT);
         let { data, error, count } = await selectHistory(
-          this.historyReplayRelationSupported === false ? HISTORY_FIELDS : HISTORY_FIELDS_WITH_REPLAYS,
+          this.historyReplayRelationSupported === false
+            ? HISTORY_FIELDS
+            : HISTORY_FIELDS_WITH_REPLAYS,
         );
-        if (error && this.historyReplayRelationSupported !== false && replayRelationUnavailable(error)) {
+        if (
+          error &&
+          this.historyReplayRelationSupported !== false &&
+          replayRelationUnavailable(error)
+        ) {
           this.historyReplayRelationSupported = false;
           ({ data, error, count } = await selectHistory(HISTORY_FIELDS));
         } else if (!error && this.historyReplayRelationSupported !== false) {
@@ -561,18 +568,25 @@ export class AccountSession {
     this.update({ historyLoadingMore: true, historyMoreError: "" });
     const load = (async () => {
       try {
-        const selectHistory = (fields: string) => this.client!.from("game_history")
-          .select(fields)
-          .or(
-            `completed_at.lt.${cursor.completed_at},and(completed_at.eq.${cursor.completed_at},completion_id.lt."${cursor.completion_id}")`,
-          )
-          .order("completed_at", { ascending: false })
-          .order("completion_id", { ascending: false })
-          .limit(HISTORY_PAGE_SIZE + 1);
+        const selectHistory = (fields: string) =>
+          this.client!.from("game_history")
+            .select(fields)
+            .or(
+              `completed_at.lt.${cursor.completed_at},and(completed_at.eq.${cursor.completed_at},completion_id.lt."${cursor.completion_id}")`,
+            )
+            .order("completed_at", { ascending: false })
+            .order("completion_id", { ascending: false })
+            .limit(HISTORY_PAGE_SIZE + 1);
         let { data, error } = await selectHistory(
-          this.historyReplayRelationSupported === false ? HISTORY_FIELDS : HISTORY_FIELDS_WITH_REPLAYS,
+          this.historyReplayRelationSupported === false
+            ? HISTORY_FIELDS
+            : HISTORY_FIELDS_WITH_REPLAYS,
         );
-        if (error && this.historyReplayRelationSupported !== false && replayRelationUnavailable(error)) {
+        if (
+          error &&
+          this.historyReplayRelationSupported !== false &&
+          replayRelationUnavailable(error)
+        ) {
           this.historyReplayRelationSupported = false;
           ({ data, error } = await selectHistory(HISTORY_FIELDS));
         } else if (!error && this.historyReplayRelationSupported !== false) {
@@ -618,14 +632,15 @@ export class AccountSession {
     }
   }
 
-  private async attachReplayAvailability(
-    entries: GameHistoryEntry[],
-  ): Promise<GameHistoryEntry[]> {
+  private async attachReplayAvailability(entries: GameHistoryEntry[]): Promise<GameHistoryEntry[]> {
     if (!entries.length || !this.client) return entries;
     const { data, error } = await this.client
       .from("game_history_rounds")
       .select("completion_id")
-      .in("completion_id", entries.map((entry) => entry.completion_id));
+      .in(
+        "completion_id",
+        entries.map((entry) => entry.completion_id),
+      );
     if (error) {
       if (replayRelationUnavailable(error))
         return entries.map((entry) => ({ ...entry, replay_available: false }));
