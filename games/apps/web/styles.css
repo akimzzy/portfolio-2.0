@@ -2624,14 +2624,6 @@ button {
   font-size: 11px;
   line-height: 16px;
 }
-.account-username-change {
-  display: grid;
-  gap: 8px;
-  margin: 5px 0 2px;
-}
-.account-username-change[hidden] {
-  display: none;
-}
 .account-username-change-trigger {
   display: inline-grid;
   min-height: 38px;
@@ -2684,19 +2676,6 @@ button {
 .account-username-warning {
   color: var(--muted);
 }
-.account-username-availability {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-.account-username-availability .game-button {
-  width: auto;
-  min-width: 72px;
-  min-height: 36px;
-  flex: 0 0 auto;
-  justify-content: center;
-}
 .account-username-success {
   color: var(--history-win);
 }
@@ -2704,16 +2683,28 @@ button {
   color: var(--history-loss);
 }
 .account-username-edit-form {
-  display: grid;
+  display: flex;
   width: 100%;
+  min-height: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 14px;
+  overflow: hidden;
+}
+.account-username-form-body {
+  display: grid;
+  min-height: 0;
+  flex: 1 1 auto;
+  align-content: start;
   gap: 8px;
-  padding: 4px 0 2px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 .account-username-edit-form label {
   font-size: 12px;
   font-weight: 600;
 }
-.account-username-edit-form > small {
+.account-username-form-body > small {
   margin: -4px 0 0;
   color: var(--muted);
   font-size: 11px;
@@ -2721,8 +2712,8 @@ button {
 }
 .account-username-edit-actions {
   display: flex;
+  flex: 0 0 auto;
   gap: 8px;
-  margin-top: 2px;
 }
 .account-username-edit-actions > * {
   flex: 1 1 0;
@@ -2733,6 +2724,39 @@ button {
   color: #a34132 !important;
   font-size: 12px !important;
   line-height: 17px !important;
+}
+.account-username-dialog {
+  display: none;
+  width: min(420px, calc(100vw - 32px));
+  max-height: min(calc(100dvh - 32px), 560px);
+  overflow: hidden;
+}
+.account-username-dialog[open] {
+  display: flex;
+  flex-direction: column;
+}
+.account-username-dialog::backdrop {
+  background: rgb(10 12 16 / 0.42);
+}
+.account-username-dialog .account-username-content {
+  display: flex;
+  min-height: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 14px;
+  overflow: hidden;
+  text-align: left;
+}
+.account-username-dialog .online-dialog-header {
+  flex: 0 0 auto;
+  margin: 0;
+}
+.account-username-dialog .online-dialog-header h2 {
+  font-size: 19px;
+}
+.account-username-result {
+  display: grid;
+  gap: 18px;
 }
 :root[data-theme="dark"] .account-error {
   color: #ff9c8b !important;
@@ -4652,6 +4676,9 @@ button {
     max-width: 82px;
   }
   .account-signout-dialog .account-signout-content {
+    padding: 28px 20px max(20px, env(safe-area-inset-bottom));
+  }
+  .account-username-dialog .account-username-content {
     padding: 28px 20px max(20px, env(safe-area-inset-bottom));
   }
   .account-signout-actions {
