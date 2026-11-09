@@ -51,6 +51,7 @@ type CreateRoomInput = Readonly<{
   seriesTarget: 1 | 2 | 3;
   matchAnySeries: boolean;
   displayName: string;
+  useAccountIdentity: boolean;
 }>;
 type GameDialogOptions = Pick<GameDialogView, "mode" | "title" | "primaryLabel"> &
   Partial<Omit<GameDialogView, "mode" | "title" | "primaryLabel">>;
@@ -1491,6 +1492,7 @@ export function createGameController() {
     seriesTarget,
     matchAnySeries,
     displayName,
+    useAccountIdentity,
   }: CreateRoomInput) {
     updateOnlineDialog({ busy: true, error: "Creating your game…" });
     try {
@@ -1502,6 +1504,7 @@ export function createGameController() {
               seriesTarget,
               matchAnySeries,
               displayName,
+              identityMode: useAccountIdentity ? "account" : "guest",
             })
           : await matchCoordinator.createRoom({
               gameId: currentGameId,
@@ -1509,6 +1512,7 @@ export function createGameController() {
               visibility,
               seriesTarget,
               displayName,
+              identityMode: useAccountIdentity ? "account" : "guest",
             });
       if (creation.status === "blocked") {
         showMatchLockNotice(creation.lock);
@@ -1558,7 +1562,7 @@ export function createGameController() {
         result.seatToken,
         result.seat ?? "first",
         displayName ?? "",
-        accountSession.getIdentity() !== null,
+        useAccountIdentity,
       );
     } catch (error: unknown) {
       activeMatchNotice = "";
@@ -1581,6 +1585,7 @@ export function createGameController() {
     opponentName: string,
     seriesTarget: 1 | 2 | 3,
     displayName: string,
+    useAccountIdentity: boolean,
   ) {
     if (!clientGames.get(gameId) || !isRegisteredOpponentProfile(gameId, profileId)) return;
     let lock = readDeviceMatchLock();
@@ -1602,6 +1607,7 @@ export function createGameController() {
         seriesTarget,
         displayName,
         opponentName,
+        identityMode: useAccountIdentity ? "account" : "guest",
       });
       if (creation.status === "blocked") {
         showMatchLockNotice(creation.lock);
@@ -1635,7 +1641,7 @@ export function createGameController() {
         creation.seatToken,
         "second",
         displayName,
-        accountSession.getIdentity() !== null,
+        useAccountIdentity,
       );
       if (onlineDialogView?.mode === "opponent") {
         opponentIntent = null;
@@ -1970,6 +1976,7 @@ export function createGameController() {
       matchAnySeries: false,
       visibility: "public",
       optionsExpanded: false,
+      joinAsGuest: accountSession.getIdentity() === null,
     };
     clearPlayerNameError();
     showGameView();
@@ -2125,6 +2132,7 @@ export function createGameController() {
     returnToGamesAfterCreateDialog = appStore.getSnapshot().screen === "lobby";
     currentGameId = gameId;
     onlineForm = { ...onlineForm, seriesTarget, visibility: "public", optionsExpanded: false };
+    onlineForm.joinAsGuest = accountSession.getIdentity() === null;
     clearPlayerNameError();
     showGameView();
     presentOnlineDialog({
@@ -2230,38 +2238,73 @@ export function createGameController() {
     return true;
   }
 
-  function submitCreate() {
-    if (!onlineDialogView || onlineDialogView.mode !== "create" || onlineDialogView.busy) return;
+  async function submitCreate() {
+    if (
+      !onlineDialogView ||
+      onlineDialogView.mode !== "create" ||
+      onlineDialogView.busy ||
+      accountSession.getSnapshot().status === "loading"
+    )
+      return;
     unlockAudio();
-    const displayName = chosenDisplayName();
+    const useAccountIdentity = !onlineForm.joinAsGuest;
     updateOnlineDialog({ busy: true, error: "Preparing your game…" });
-    void createOnlineMatch({
-      visibility: onlineForm.visibility,
-      seriesTarget: onlineForm.seriesTarget,
-      matchAnySeries: onlineForm.matchAnySeries,
-      displayName,
-    });
+    try {
+      if (useAccountIdentity && !(await accountSession.getIdentityForRequest()))
+        throw new Error("Your sign-in session is unavailable. Sign in again or choose Guest.");
+      const displayName = chosenDisplayName(useAccountIdentity);
+      await createOnlineMatch({
+        visibility: onlineForm.visibility,
+        seriesTarget: onlineForm.seriesTarget,
+        matchAnySeries: onlineForm.matchAnySeries,
+        displayName,
+        useAccountIdentity,
+      });
+    } catch (error: unknown) {
+      updateOnlineDialog({
+        error:
+          error instanceof TypeError
+            ? "Could not reach the game service. Check your connection and try again."
+            : errorMessage(error),
+        busy: false,
+      });
+    }
   }
 
-  function submitOpponent() {
+  async function submitOpponent() {
     if (
       !onlineDialogView ||
       onlineDialogView.mode !== "opponent" ||
       onlineDialogView.busy ||
+      accountSession.getSnapshot().status === "loading" ||
       !opponentIntent
     )
       return;
     unlockAudio();
     const intent = opponentIntent;
     updateOnlineDialog({ busy: true, error: "Starting your game…" });
-    void createOpponentOnlineMatch(
-      intent.gameId,
-      intent.profileId,
-      intent.inHousePlayerId,
-      intent.opponentName,
-      intent.seriesTarget,
-      chosenDisplayName(),
-    );
+    const useAccountIdentity = !onlineForm.joinAsGuest;
+    try {
+      if (useAccountIdentity && !(await accountSession.getIdentityForRequest()))
+        throw new Error("Your sign-in session is unavailable. Sign in again or choose Guest.");
+      await createOpponentOnlineMatch(
+        intent.gameId,
+        intent.profileId,
+        intent.inHousePlayerId,
+        intent.opponentName,
+        intent.seriesTarget,
+        chosenDisplayName(useAccountIdentity),
+        useAccountIdentity,
+      );
+    } catch (error: unknown) {
+      updateOnlineDialog({
+        error:
+          error instanceof TypeError
+            ? "Could not reach the game. Check your connection and try again."
+            : errorMessage(error),
+        busy: false,
+      });
+    }
   }
 
   async function copyInviteLink() {
@@ -2640,6 +2683,7 @@ export function createGameController() {
       seriesTarget: expiredMatch.seriesTarget,
       matchAnySeries: onlineForm.matchAnySeries,
       displayName: multiplayer.displayName ?? expiredMatch.playerNames?.[0] ?? "",
+      useAccountIdentity: multiplayer.accountLinked,
     };
     currentGameId = expiredMatch.gameId;
     gameDialog.close("recreate-room");

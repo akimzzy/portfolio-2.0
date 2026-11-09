@@ -24,6 +24,15 @@ export class MatchApiClient {
     return token ? { Authorization: `Bearer ${token}` } : {};
   }
 
+  private async identityHeadersForMode(
+    identityMode: "account" | "guest" = "account",
+  ): Promise<HeadersInit> {
+    const headers = await this.identityHeaders(identityMode !== "guest");
+    if (identityMode === "account" && !new Headers(headers).has("authorization"))
+      throw new Error("Your sign-in session is unavailable. Sign in again or choose Guest.");
+    return headers;
+  }
+
   async createMatch(
     input: Readonly<{
       gameId: string;
@@ -31,13 +40,15 @@ export class MatchApiClient {
       visibility: string;
       seriesTarget: number;
       displayName: string;
+      identityMode?: "account" | "guest";
     }>,
   ): Promise<MatchApiResponse> {
-    const identityHeaders = await this.identityHeaders();
+    const { identityMode = "account", ...requestBody } = input;
+    const identityHeaders = await this.identityHeadersForMode(identityMode);
     return this.request("/v1/matches", {
       method: "POST",
       headers: { "Content-Type": "application/json", ...identityHeaders },
-      body: JSON.stringify(input),
+      body: JSON.stringify(requestBody),
     });
   }
 
@@ -48,13 +59,15 @@ export class MatchApiClient {
       seriesTarget: number;
       matchAnySeries?: boolean;
       displayName: string;
+      identityMode?: "account" | "guest";
     }>,
   ): Promise<MatchApiResponse> {
-    const identityHeaders = await this.identityHeaders();
+    const { identityMode = "account", ...requestBody } = input;
+    const identityHeaders = await this.identityHeadersForMode(identityMode);
     return this.request("/v1/matches/quick", {
       method: "POST",
       headers: { "Content-Type": "application/json", ...identityHeaders },
-      body: JSON.stringify(input),
+      body: JSON.stringify(requestBody),
       signal: AbortSignal.timeout(8_000),
     });
   }
@@ -67,13 +80,15 @@ export class MatchApiClient {
       seriesTarget: number;
       displayName: string;
       opponentName: string;
+      identityMode?: "account" | "guest";
     }>,
   ): Promise<MatchApiResponse> {
-    const identityHeaders = await this.identityHeaders();
+    const { identityMode = "account", ...requestBody } = input;
+    const identityHeaders = await this.identityHeadersForMode(identityMode);
     return this.request("/v1/matches/ai", {
       method: "POST",
       headers: { "Content-Type": "application/json", ...identityHeaders },
-      body: JSON.stringify(input),
+      body: JSON.stringify(requestBody),
       signal: AbortSignal.timeout(8_000),
     });
   }
@@ -101,9 +116,7 @@ export class MatchApiClient {
     }>,
   ): Promise<MatchApiResponse> {
     const { identityMode = "account", ...requestBody } = input;
-    const identityHeaders = await this.identityHeaders(identityMode !== "guest");
-    if (identityMode === "account" && !new Headers(identityHeaders).has("authorization"))
-      throw new Error("Your sign-in session is unavailable. Sign in again or choose Guest.");
+    const identityHeaders = await this.identityHeadersForMode(identityMode);
     return this.request(`/v1/matches/${encodeURIComponent(matchId)}/join`, {
       method: "POST",
       headers: { "Content-Type": "application/json", ...identityHeaders },

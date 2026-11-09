@@ -67,6 +67,55 @@ test("failed account restoration prevents the room request instead of downgradin
   }
 });
 
+test("guest room creation skips account tokens for public, private, and in-house matches", async () => {
+  const originalFetch = globalThis.fetch;
+  const requests = [];
+  let tokenReads = 0;
+  globalThis.fetch = async (url, init) => {
+    requests.push({ url: String(url), init });
+    return Response.json({});
+  };
+  try {
+    const client = new MatchApiClient("https://games.example", async () => {
+      tokenReads += 1;
+      return "must-not-be-read";
+    });
+    await client.createMatch({
+      gameId: "connect-four",
+      rulesVersion: 1,
+      visibility: "invite",
+      seriesTarget: 1,
+      displayName: "Swift Fox 42",
+      identityMode: "guest",
+    });
+    await client.quickMatch({
+      gameId: "connect-four",
+      rulesVersion: 1,
+      seriesTarget: 1,
+      displayName: "Swift Fox 42",
+      identityMode: "guest",
+    });
+    await client.createAiMatch({
+      gameId: "connect-four",
+      profileId: "standard",
+      inHousePlayerId: "house_ayo",
+      seriesTarget: 1,
+      displayName: "Swift Fox 42",
+      opponentName: "Ayo",
+      identityMode: "guest",
+    });
+
+    assert.equal(tokenReads, 0);
+    assert.equal(requests.length, 3);
+    for (const { init } of requests) {
+      assert.equal(new Headers(init.headers).has("authorization"), false);
+      assert.equal(JSON.parse(init.body).identityMode, undefined);
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("account-selected joins fail closed when the account token is unavailable", async () => {
   const originalFetch = globalThis.fetch;
   let requestCount = 0;

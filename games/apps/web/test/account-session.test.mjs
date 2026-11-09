@@ -10,12 +10,19 @@ const signedInSession = {
 function fakeClient({
   profile = { username: "Akeem_7", created_at: "2026-11-01T10:00:00.000Z" },
   claim = "Akeem_7",
+  rename = {
+    username: "NewName_1",
+    username_changed_at: "2026-11-08T10:00:00.000Z",
+    next_change_at: "2026-12-08T10:00:00.000Z",
+  },
+  renameError = null,
   history = [],
   historyCount = history.length,
   historyError = null,
 } = {}) {
   let authListener;
   let historyRequests = 0;
+  const rpcRequests = [];
   return {
     client: {
       auth: {
@@ -63,9 +70,10 @@ function fakeClient({
         };
       },
       async rpc(name, args) {
-        assert.equal(name, "claim_username");
-        assert.equal(args.requested_username, "NewName_1");
-        return { data: claim, error: null };
+        rpcRequests.push({ name, args });
+        if (name === "claim_username") return { data: claim, error: null };
+        assert.equal(name, "change_username");
+        return { data: rename, error: renameError };
       },
     },
     emit(event, session) {
@@ -74,6 +82,7 @@ function fakeClient({
     get historyRequests() {
       return historyRequests;
     },
+    rpcRequests,
   };
 }
 
@@ -177,6 +186,81 @@ test("username claim updates the account identity", async () => {
   await new Promise((resolve) => setTimeout(resolve, 0));
   assert.equal(await account.claimUsername("NewName_1"), true);
   assert.equal(account.getSnapshot().username, "NewName_1");
+  account.stop();
+});
+
+test("username change updates the current identity and applies the 30-day availability date", async () => {
+  const fake = fakeClient({
+    rename: {
+      username: "NewName_1",
+      username_changed_at: "2026-11-08T10:00:00.000Z",
+      next_change_at: "2026-12-08T10:00:00.000Z",
+    },
+  });
+  const account = new AccountSession(fake.client);
+  account.start();
+  fake.emit("SIGNED_IN", signedInSession);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.equal(await account.changeUsername("NewName_1"), true);
+  assert.equal(account.getSnapshot().username, "NewName_1");
+  assert.equal(account.getSnapshot().usernameChangeAvailableAt, "2026-12-08T10:00:00.000Z");
+  assert.deepEqual(fake.rpcRequests.at(-1), {
+    name: "change_username",
+    args: { requested_username: "NewName_1" },
+  });
+  account.stop();
+});
+
+test("username change cooldown is enforced locally before an RPC is sent", async () => {
+  const fake = fakeClient({
+    profile: {
+      username: "Akeem_7",
+      created_at: "2026-11-01T10:00:00.000Z",
+      username_changed_at: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString(),
+    },
+  });
+  const account = new AccountSession(fake.client);
+  account.start();
+  fake.emit("SIGNED_IN", signedInSession);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.equal(await account.changeUsername("NewName_1"), false);
+  assert.match(account.getSnapshot().usernameChangeError, /change your username again on/);
+  assert.equal(fake.rpcRequests.length, 0);
+  account.stop();
+});
+
+test("username change reports taken names and stays retryable", async () => {
+  const fake = fakeClient({ renameError: new Error("username_taken") });
+  const account = new AccountSession(fake.client);
+  account.start();
+  fake.emit("SIGNED_IN", signedInSession);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.equal(await account.changeUsername("NewName_1"), false);
+  assert.equal(account.getSnapshot().username, "Akeem_7");
+  assert.equal(account.getSnapshot().busy, false);
+  assert.equal(
+    account.getSnapshot().usernameChangeError,
+    "That username is already taken. Try another.",
+  );
+  account.stop();
+});
+
+test("server-side username cooldown refreshes the blocked-until date", async () => {
+  const cooldownError = new Error("username_change_cooldown");
+  cooldownError.details = "next_change_at=2026-12-08T10:00:00.000Z";
+  const fake = fakeClient({ renameError: cooldownError });
+  const account = new AccountSession(fake.client);
+  account.start();
+  fake.emit("SIGNED_IN", signedInSession);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.equal(await account.changeUsername("NewName_1"), false);
+  assert.equal(account.getSnapshot().busy, false);
+  assert.equal(account.getSnapshot().usernameChangeAvailableAt, "2026-12-08T10:00:00.000Z");
+  assert.match(account.getSnapshot().usernameChangeError, /change your username again on/);
   account.stop();
 });
 

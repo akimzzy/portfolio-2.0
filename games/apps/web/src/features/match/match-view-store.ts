@@ -75,7 +75,6 @@ export type MatchViewSnapshot = {
   players: readonly {
     seat: PlayerSeat;
     name: string;
-    opponentNote: string | null;
     isSelf: boolean;
     seatLabel: string;
     score: number;
@@ -129,7 +128,6 @@ const EMPTY_SNAPSHOT: MatchViewSnapshot = {
     {
       seat: "first",
       name: "Player 1",
-      opponentNote: null,
       isSelf: false,
       seatLabel: "Goes first",
       score: 0,
@@ -139,7 +137,6 @@ const EMPTY_SNAPSHOT: MatchViewSnapshot = {
     {
       seat: "second",
       name: "Player 2",
-      opponentNote: null,
       isSelf: false,
       seatLabel: "Goes second",
       score: 0,

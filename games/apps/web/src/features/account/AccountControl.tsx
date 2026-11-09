@@ -33,6 +33,9 @@ export function AccountControl({
   const [selectedHistoryId, setSelectedHistoryId] = useState<string | null>(null);
   const [historyOpeningId, setHistoryOpeningId] = useState<string | null>(null);
   const [signOutPending, setSignOutPending] = useState(false);
+  const [editingUsername, setEditingUsername] = useState(false);
+  const [usernameDraft, setUsernameDraft] = useState("");
+  const [usernameChangeSuccess, setUsernameChangeSuccess] = useState(false);
 
   useEffect(() => {
     if (account.status === "signed-out") promptedForUsername.current = false;
@@ -47,6 +50,9 @@ export function AccountControl({
     if (account.status !== "signed-in") {
       setSelectedHistoryId(null);
       setHistoryOpeningId(null);
+      setEditingUsername(false);
+      setUsernameDraft("");
+      setUsernameChangeSuccess(false);
     }
   }, [account.status]);
 
@@ -101,6 +107,7 @@ export function AccountControl({
   }, [account.status, account.error, signOutPending]);
 
   const open = () => {
+    setUsernameChangeSuccess(false);
     // Use the in-memory result immediately; only revalidate after it becomes stale.
     void accountSession.loadGameHistory();
     if (account.leaderboardPublic) void accountSession.loadLeaderboardRanks();
@@ -130,6 +137,15 @@ export function AccountControl({
       close();
     }
   };
+  const submitUsernameChange = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const changed = await accountSession.changeUsername(usernameDraft);
+    if (changed) {
+      setEditingUsername(false);
+      setUsernameDraft("");
+      setUsernameChangeSuccess(true);
+    }
+  };
   const accountLoading = account.status === "loading";
   const buttonLabel = account.username
     ? `Account menu for @${account.username}`
@@ -137,6 +153,9 @@ export function AccountControl({
       ? "Loading account"
       : "Account and sign in";
   const themeLabel = theme === "system" ? "System" : theme === "dark" ? "Dark" : "Light";
+  const usernameChangeAvailableAt = account.usernameChangeAvailableAt;
+  const usernameCanChange =
+    !usernameChangeAvailableAt || Date.parse(usernameChangeAvailableAt) <= Date.now();
   return (
     <>
       <button
@@ -268,6 +287,26 @@ export function AccountControl({
                       <strong>@{account.username}</strong>
                     </div>
                     <button
+                      className="account-username-change-trigger"
+                      type="button"
+                      disabled={account.busy}
+                      aria-expanded={editingUsername || usernameChangeSuccess}
+                      aria-controls="account-username-change-panel"
+                      onClick={() => {
+                        if (editingUsername) {
+                          setEditingUsername(false);
+                          setUsernameDraft("");
+                          accountSession.clearUsernameChangeError();
+                          return;
+                        }
+                        setUsernameDraft(account.username ?? "");
+                        setUsernameChangeSuccess(false);
+                        setEditingUsername(true);
+                      }}
+                    >
+                      <span className="account-username-change-label">Change username</span>
+                    </button>
+                    <button
                       className="account-sign-out-link"
                       type="button"
                       aria-label="Sign out"
@@ -301,6 +340,95 @@ export function AccountControl({
                       );
                     })}
                   </div>
+                </section>
+                <section
+                  className="account-username-change"
+                  id="account-username-change-panel"
+                  aria-label="Change username"
+                  hidden={!editingUsername && !usernameChangeSuccess}
+                >
+                  {usernameChangeSuccess && !editingUsername && (
+                    <p className="account-username-success" role="status">
+                      Username updated.
+                    </p>
+                  )}
+                  {editingUsername && !usernameCanChange && usernameChangeAvailableAt && (
+                    <div className="account-username-availability" role="status">
+                      <p className="account-username-cooldown">
+                        Available again {accountDate.format(new Date(usernameChangeAvailableAt))}.
+                      </p>
+                      <Button
+                        variant="secondary"
+                        type="button"
+                        onClick={() => {
+                          setEditingUsername(false);
+                          setUsernameDraft("");
+                        }}
+                      >
+                        Done
+                      </Button>
+                    </div>
+                  )}
+                  {editingUsername && usernameCanChange && (
+                    <form
+                      className="account-username-edit-form"
+                      onSubmit={(event) => void submitUsernameChange(event)}
+                    >
+                      <p className="account-username-warning">
+                        You can change it once every 30 days. Your old username is held for you for
+                        30 days; current and past matches keep their recorded names.
+                      </p>
+                      <label htmlFor="account-change-username">New username</label>
+                      <div className="account-username-input">
+                        <span aria-hidden="true">@</span>
+                        <input
+                          id="account-change-username"
+                          name="new-username"
+                          value={usernameDraft}
+                          onChange={(event) => {
+                            setUsernameDraft(event.currentTarget.value);
+                            accountSession.clearUsernameChangeError();
+                          }}
+                          autoComplete="username"
+                          maxLength={20}
+                          minLength={3}
+                          required
+                          pattern="[A-Za-z][A-Za-z0-9_]{2,19}"
+                          aria-describedby="change-username-hint"
+                          disabled={account.busy}
+                        />
+                      </div>
+                      <small id="change-username-hint">
+                        3–20 characters. Start with a letter; use letters, numbers, or underscores.
+                      </small>
+                      {account.usernameChangeError && (
+                        <p className="account-username-change-error" role="alert">
+                          {account.usernameChangeError}
+                        </p>
+                      )}
+                      <div className="account-username-edit-actions">
+                        <Button
+                          variant="secondary"
+                          type="button"
+                          disabled={account.busy}
+                          onClick={() => {
+                            setEditingUsername(false);
+                            setUsernameDraft("");
+                            accountSession.clearUsernameChangeError();
+                          }}
+                        >
+                          Cancel
+                        </Button>
+                        <Button
+                          variant="primary"
+                          type="submit"
+                          disabled={account.busy || !usernameDraft.trim()}
+                        >
+                          {account.busy ? "Saving…" : "Save username"}
+                        </Button>
+                      </div>
+                    </form>
+                  )}
                 </section>
                 <div className="account-leaderboard-privacy">
                   <span>

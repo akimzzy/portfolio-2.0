@@ -27,6 +27,8 @@
   --history-win-bg: #e6f3e9;
   --history-loss: #a13f35;
   --history-loss-bg: #f8e9e6;
+  --account-action: #17685f;
+  --account-action-ink: #fff;
   --rank-gold: #8b6500;
   --rank-silver: #5e6875;
   --rank-bronze: #884a2b;
@@ -50,6 +52,8 @@
   --history-win-bg: rgb(62 139 86 / 0.2);
   --history-loss: #ffad9f;
   --history-loss-bg: rgb(180 72 58 / 0.2);
+  --account-action: #8ed6c9;
+  --account-action-ink: #0d0e0c;
   --rank-gold: #f2ca58;
   --rank-silver: #d0d4dc;
   --rank-bronze: #e4946d;
@@ -75,6 +79,8 @@
     --history-win-bg: rgb(62 139 86 / 0.2);
     --history-loss: #ffad9f;
     --history-loss-bg: rgb(180 72 58 / 0.2);
+    --account-action: #8ed6c9;
+    --account-action-ink: #0d0e0c;
     --rank-gold: #f2ca58;
     --rank-silver: #d0d4dc;
     --rank-bronze: #e4946d;
@@ -2072,27 +2078,55 @@ button {
   display: grid;
   width: min(100%, 540px);
   grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
   margin: 0 auto;
-  border-top: 1px solid var(--divider);
-  border-bottom: 1px solid var(--divider);
 }
 .player-row {
+  position: relative;
   display: grid;
   min-width: 0;
-  min-height: 58px;
-  grid-template-columns: 24px minmax(0, 1fr) auto;
+  min-height: 64px;
+  grid-template-columns: 24px minmax(0, 1fr);
   align-items: center;
   gap: 7px;
-  padding: 3px 9px;
-  opacity: 0.76;
-  transition: opacity 140ms ease;
+  padding: 7px 9px;
+  border: 1px solid var(--divider);
+  border-radius: 8px;
+  background: var(--surface);
+  opacity: 0.88;
+  transition:
+    opacity 140ms ease,
+    border-color 140ms ease,
+    background-color 140ms ease;
 }
-.player-row + .player-row {
-  border-left: 1px solid var(--divider);
+.player-row::before {
+  position: absolute;
+  top: 9px;
+  bottom: 9px;
+  left: 0;
+  width: 3px;
+  border-radius: 0 3px 3px 0;
+  background: var(--player-accent);
+  content: "";
+  pointer-events: none;
+}
+.player-row[data-player="first"] {
+  --player-accent: var(--token-one);
+}
+.player-row[data-player="second"] {
+  --player-accent: var(--token-two);
 }
 .player-row.is-active,
 .player-row.is-winner {
   opacity: 1;
+}
+.player-row.is-active {
+  border-color: color-mix(in srgb, var(--player-accent) 55%, var(--divider));
+  background: color-mix(in srgb, var(--player-accent) 5%, var(--surface));
+}
+.player-row.is-winner {
+  border-color: color-mix(in srgb, var(--history-win) 58%, var(--divider));
+  background: color-mix(in srgb, var(--history-win-bg) 60%, var(--surface));
 }
 .player-token {
   display: grid;
@@ -2113,11 +2147,13 @@ button {
 .player-copy {
   display: grid;
   min-width: 0;
-  min-height: 44px;
+  min-height: 46px;
   align-content: center;
   gap: 1px;
 }
 .player-name {
+  min-width: 0;
+  flex: 1 1 auto;
   overflow: hidden;
   font-size: 12px;
   font-weight: 600;
@@ -2127,16 +2163,9 @@ button {
 .player-name-line {
   display: flex;
   min-width: 0;
-  align-items: baseline;
-  gap: 5px;
-}
-.player-opponent-note {
-  flex: 0 0 auto;
-  color: var(--muted);
-  font-size: 9px;
-  font-weight: 500;
-  line-height: 13px;
-  white-space: nowrap;
+  min-height: 18px;
+  align-items: center;
+  gap: 4px;
 }
 .player-status-line {
   display: flex;
@@ -2173,22 +2202,14 @@ button {
   justify-content: flex-end;
 }
 .player-score {
+  flex: 0 0 auto;
   min-width: 15px;
   font-size: 15px;
+  line-height: 18px;
   font-variant-numeric: tabular-nums;
   font-weight: 600;
   text-align: right;
-}
-.player-row-trailing {
-  display: inline-flex;
-  min-width: 22px;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 5px;
-}
-.player-row-trailing .countdown-indicator {
-  min-width: 28px;
-  font-size: 11px;
+  margin-left: auto;
 }
 .is-winner .player-score::after {
   content: " · win";
@@ -2603,6 +2624,110 @@ button {
   font-size: 11px;
   line-height: 16px;
 }
+.account-username-change {
+  display: grid;
+  gap: 8px;
+  margin: 5px 0 2px;
+}
+.account-username-change[hidden] {
+  display: none;
+}
+.account-username-change-trigger {
+  display: inline-grid;
+  min-height: 38px;
+  flex: 0 0 auto;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  color: inherit;
+  background: transparent;
+}
+.account-username-change-label {
+  display: inline-flex;
+  min-height: 28px;
+  align-items: center;
+  justify-content: center;
+  padding: 0 8px;
+  border: 1px solid var(--account-action);
+  border-radius: 6px;
+  color: var(--account-action-ink);
+  background: var(--account-action);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+  transition: filter 120ms ease;
+}
+.account-username-change-trigger:hover:not(:disabled) {
+  cursor: pointer;
+}
+.account-username-change-trigger:hover:not(:disabled) .account-username-change-label {
+  filter: brightness(0.94);
+}
+.account-username-change-trigger:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+.account-username-change-trigger:disabled {
+  cursor: wait;
+  opacity: 0.6;
+}
+.account-username-cooldown,
+.account-username-warning,
+.account-username-success,
+.account-username-change-error {
+  margin: 0;
+  font-size: 11px;
+  line-height: 16px;
+}
+.account-username-cooldown,
+.account-username-warning {
+  color: var(--muted);
+}
+.account-username-availability {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.account-username-availability .game-button {
+  width: auto;
+  min-width: 72px;
+  min-height: 36px;
+  flex: 0 0 auto;
+  justify-content: center;
+}
+.account-username-success {
+  color: var(--history-win);
+}
+.account-username-change-error {
+  color: var(--history-loss);
+}
+.account-username-edit-form {
+  display: grid;
+  width: 100%;
+  gap: 8px;
+  padding: 4px 0 2px;
+}
+.account-username-edit-form label {
+  font-size: 12px;
+  font-weight: 600;
+}
+.account-username-edit-form > small {
+  margin: -4px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 16px;
+}
+.account-username-edit-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 2px;
+}
+.account-username-edit-actions > * {
+  flex: 1 1 0;
+  min-width: 0;
+}
 .account-error {
   margin: 10px 0 0 !important;
   color: #a34132 !important;
@@ -2614,19 +2739,21 @@ button {
 }
 .account-summary {
   display: grid;
-  gap: 3px;
+  gap: 6px;
   margin: 0 0 5px;
   padding: 0;
 }
 .account-identity-row {
   display: flex;
+  flex-wrap: wrap;
   min-width: 0;
   align-items: center;
   justify-content: flex-start;
-  gap: 9px;
+  gap: 8px;
 }
 .account-identity {
   min-width: 0;
+  flex: 0 1 auto;
 }
 .account-identity strong {
   min-width: 0;
@@ -2640,27 +2767,28 @@ button {
   min-height: 38px;
   flex: 0 0 auto;
   place-items: center;
-  padding: 0 2px;
+  padding: 0;
   border: 0;
   color: var(--muted);
   background: transparent;
+  margin-left: auto;
 }
 .account-sign-out-tag {
   display: inline-flex;
   min-height: 28px;
   align-items: center;
   padding: 0 8px;
-  border: 1px solid var(--divider);
-  border-radius: 999px;
-  color: var(--muted);
-  background: color-mix(in srgb, var(--ink) 3%, var(--page));
-  font-size: 10px;
-  font-weight: 550;
+  border: 1px solid color-mix(in srgb, var(--history-loss) 42%, var(--divider));
+  border-radius: 6px;
+  color: var(--history-loss);
+  background: color-mix(in srgb, var(--history-loss) 9%, var(--surface));
+  font-size: 11px;
+  font-weight: 600;
   line-height: 1;
 }
 .account-sign-out-link:hover:not(:disabled) .account-sign-out-tag {
-  border-color: color-mix(in srgb, var(--history-loss) 38%, var(--divider));
-  color: var(--history-loss);
+  border-color: var(--history-loss);
+  background: color-mix(in srgb, var(--history-loss) 16%, var(--surface));
 }
 .account-sign-out-link:disabled {
   cursor: default;
@@ -3418,9 +3546,17 @@ button {
   stroke-linejoin: round;
   stroke-width: 1.6;
 }
+.leaderboard-list-region {
+  position: relative;
+  min-width: 0;
+}
+.leaderboard-list-region.is-empty .leaderboard-current-standing {
+  position: static;
+  margin-top: 0;
+}
 .leaderboard-list {
   display: grid;
-  max-height: min(calc(100dvh - 410px), 560px);
+  max-height: max(160px, calc(100dvh - 250px));
   gap: 7px;
   overflow-y: auto;
   overscroll-behavior: contain;
@@ -3508,12 +3644,17 @@ button {
   font-size: 10px;
 }
 .leaderboard-current-standing {
+  position: absolute;
+  z-index: 1;
+  right: 4px;
+  bottom: 6px;
+  left: 2px;
   display: grid;
   min-height: 56px;
   grid-template-columns: 30px minmax(0, 1fr) auto;
   align-items: center;
   gap: 10px;
-  margin-top: 7px;
+  margin: 0;
   padding: 8px 11px;
   border: 1px solid color-mix(in srgb, var(--link) 62%, var(--divider));
   border-radius: 8px;
@@ -3601,24 +3742,9 @@ button {
   min-height: 42px;
 }
 .account-signout-actions .game-button:last-child {
+  border-color: color-mix(in srgb, var(--history-loss) 48%, var(--divider));
   color: var(--history-loss);
-}
-.account-match-name {
-  padding: 10px 12px;
-  border: 1px solid var(--divider);
-  border-radius: 5px;
-  background: var(--surface);
-}
-.account-match-name .account-match-label {
-  color: var(--muted);
-  font-size: 12px;
-}
-.account-match-name strong {
-  font-size: 15px;
-  font-weight: 600;
-}
-.account-match-name small {
-  margin: 0;
+  background: var(--history-loss-bg);
 }
 .dialog-content {
   position: relative;
@@ -3828,6 +3954,18 @@ button {
 }
 .join-identity-options strong {
   font-weight: 600;
+}
+.identity-choice-details {
+  min-width: 0;
+}
+.identity-choice-details .player-name-field {
+  width: 100%;
+  margin: 16px 0 20px;
+}
+.identity-choice-note {
+  margin: 16px 0 20px;
+  color: var(--muted);
+  font-size: 13px;
 }
 .join-account-signin {
   display: flex;
@@ -4745,7 +4883,7 @@ button {
     font-size: 0;
   }
   .player-row {
-    grid-template-columns: 20px minmax(0, 1fr) auto;
+    grid-template-columns: 20px minmax(0, 1fr);
     gap: 4px;
     padding-inline: 4px;
   }
@@ -4826,11 +4964,7 @@ button {
     margin: 0;
   }
   .player-row {
-    grid-template-columns: 20px minmax(0, 1fr) auto;
-  }
-  .player-row + .player-row {
-    border-top: 0;
-    border-left: 1px solid var(--divider);
+    grid-template-columns: 20px minmax(0, 1fr);
   }
 }
 @media (min-width: 700px) and (min-height: 521px) and (max-height: 780px) {
@@ -4965,10 +5099,6 @@ body:has(.match-page-shell) {
   }
   .match-status-bar .player-list {
     grid-template-columns: minmax(0, 1fr);
-  }
-  .match-status-bar .player-row + .player-row {
-    border-top: 1px solid var(--divider);
-    border-left: 0;
   }
   .game-layout {
     grid-column: 1;

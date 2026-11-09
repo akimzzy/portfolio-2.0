@@ -46,6 +46,8 @@ export type AccountLeaderboardRank = Readonly<{ game_id: string; rank: number }>
 export type AccountSnapshot = Readonly<{
   status: "unconfigured" | "loading" | "signed-out" | "profile-required" | "signed-in" | "error";
   username: string | null;
+  usernameChangeAvailableAt: string | null;
+  usernameChangeError: string;
   leaderboardPublic: boolean;
   leaderboardRanks: AccountLeaderboardRank[];
   leaderboardRanksStatus: "idle" | "loading" | "ready" | "error";
@@ -69,6 +71,8 @@ export type AccountSnapshot = Readonly<{
 }>;
 
 const USERNAME_PATTERN = /^[A-Za-z][A-Za-z0-9_]{2,19}$/;
+const USERNAME_CHANGE_COOLDOWN_MS = 30 * 24 * 60 * 60 * 1000;
+const accountDate = new Intl.DateTimeFormat(undefined, { dateStyle: "medium" });
 const HISTORY_CACHE_TTL_MS = 60_000;
 const OAUTH_MATCH_RETURN_KEY = "games.oauth-match-return";
 const OAUTH_MATCH_RETURN_TTL_MS = 15 * 60_000;
@@ -78,6 +82,8 @@ const LEADERBOARD_RANKS_CACHE_TTL_MS = 5 * 60_000;
 const initialSnapshot: AccountSnapshot = {
   status: "loading",
   username: null,
+  usernameChangeAvailableAt: null,
+  usernameChangeError: "",
   leaderboardPublic: true,
   leaderboardRanks: [],
   leaderboardRanksStatus: "idle",
@@ -276,13 +282,22 @@ export class AccountSession {
         this.update({
           status: "signed-out",
           username: null,
+          usernameChangeAvailableAt: null,
+          usernameChangeError: "",
           joinedAt: null,
           error: "",
           busy: false,
         });
         return;
       }
-      this.update({ status: "loading", username: null, error: "" });
+      this.update({
+        status: "loading",
+        username: null,
+        usernameChangeAvailableAt: null,
+        usernameChangeError: "",
+        busy: false,
+        error: "",
+      });
       const request = this.profileRequest;
       queueMicrotask(() => {
         void this.loadProfile(session, request);
@@ -417,6 +432,8 @@ export class AccountSession {
       this.update({
         status: "signed-in",
         username: saved,
+        usernameChangeAvailableAt: null,
+        usernameChangeError: "",
         leaderboardPublic: true,
         leaderboardRanks: [],
         leaderboardRanksStatus: "idle",
@@ -434,6 +451,110 @@ export class AccountSession {
       });
       return false;
     }
+  }
+
+  async changeUsername(username: string): Promise<boolean> {
+    const cleaned = username.trim();
+    if (
+      !this.client ||
+      !this.session ||
+      this.snapshot.status !== "signed-in" ||
+      this.snapshot.busy
+    ) {
+      this.update({ usernameChangeError: "Sign in again before changing your username." });
+      return false;
+    }
+    if (!USERNAME_PATTERN.test(cleaned)) {
+      this.update({
+        usernameChangeError: "Use 3–20 letters, numbers, or underscores. Start with a letter.",
+      });
+      return false;
+    }
+    if (cleaned.toLowerCase() === this.snapshot.username?.toLowerCase()) {
+      this.update({ usernameChangeError: "Choose a different username." });
+      return false;
+    }
+    const availableAt = this.snapshot.usernameChangeAvailableAt;
+    if (availableAt && Date.parse(availableAt) > Date.now()) {
+      this.update({
+        usernameChangeError: `You can change your username again on ${accountDate.format(new Date(availableAt))}.`,
+      });
+      return false;
+    }
+
+    const userId = this.session.user.id;
+    this.update({ busy: true, usernameChangeError: "" });
+    try {
+      const { data, error } = await this.client.rpc("change_username", {
+        requested_username: cleaned,
+      });
+      if (this.session?.user.id !== userId) return false;
+      if (error) {
+        const message = error.message.toLowerCase();
+        const detail = typeof error.details === "string" ? error.details : "";
+        const nextChangeMatch = detail.match(/next_change_at=([^\s;]+)/i);
+        const nextChangeAt = nextChangeMatch?.[1];
+        if (message.includes("username_change_cooldown") && nextChangeAt) {
+          const parsed = Date.parse(nextChangeAt);
+          if (Number.isFinite(parsed)) {
+            this.update({
+              busy: false,
+              usernameChangeAvailableAt: new Date(parsed).toISOString(),
+              usernameChangeError: `You can change your username again on ${accountDate.format(new Date(parsed))}.`,
+            });
+            return false;
+          }
+        }
+        this.update({
+          busy: false,
+          usernameChangeError:
+            message.includes("username_taken") || message.includes("profiles_username_lower_unique")
+              ? "That username is already taken. Try another."
+              : message.includes("reserved_username") ||
+                  message.includes("username_reservation_conflict")
+                ? "That username is reserved. Choose another."
+                : message.includes("invalid_username")
+                  ? "Use 3–20 letters, numbers, or underscores. Start with a letter."
+                  : message.includes("not_authenticated")
+                    ? "Your sign-in expired. Sign in again before changing your username."
+                    : message.includes("username_change_cooldown")
+                      ? "Your username was changed recently. Try again after the 30-day waiting period."
+                      : message.includes("username_changed_concurrently")
+                        ? "Your account changed in another tab. Refresh your account and try again."
+                        : message.includes("profile_not_found")
+                          ? "Your username could not be found. Refresh your account and try again."
+                          : "We could not change your username. Please try again.",
+        });
+        return false;
+      }
+
+      const result = data && typeof data === "object" ? (data as Record<string, unknown>) : {};
+      const saved = typeof result.username === "string" ? result.username : cleaned;
+      const nextChangeAt =
+        typeof result.next_change_at === "string" &&
+        Number.isFinite(Date.parse(result.next_change_at))
+          ? new Date(result.next_change_at).toISOString()
+          : new Date(Date.now() + USERNAME_CHANGE_COOLDOWN_MS).toISOString();
+      this.update({
+        username: saved,
+        usernameChangeAvailableAt: nextChangeAt,
+        usernameChangeError: "",
+        busy: false,
+      });
+      return true;
+    } catch {
+      if (this.session?.user.id !== userId) return false;
+      this.update({
+        busy: false,
+        usernameChangeError:
+          "We could not change your username. Check your connection and try again.",
+      });
+      return false;
+    }
+  }
+
+  clearUsernameChangeError(): void {
+    if (this.snapshot.usernameChangeError) this.update({ usernameChangeError: "" });
   }
 
   async refreshProfile(): Promise<void> {
@@ -905,7 +1026,7 @@ export class AccountSession {
     try {
       const { data, error } = await this.client
         .from("profiles")
-        .select("username,created_at,leaderboard_public")
+        .select("username,created_at,leaderboard_public,username_changed_at")
         .maybeSingle();
       if (request !== this.profileRequest || this.session?.user.id !== session.user.id) return;
       if (error) {
@@ -918,12 +1039,27 @@ export class AccountSession {
         return;
       }
       if (!data || typeof data.username !== "string") {
-        this.update({ status: "profile-required", username: null, busy: false, error: "" });
+        this.update({
+          status: "profile-required",
+          username: null,
+          usernameChangeAvailableAt: null,
+          usernameChangeError: "",
+          busy: false,
+          error: "",
+        });
         return;
       }
       this.update({
         status: "signed-in",
         username: data.username,
+        usernameChangeAvailableAt:
+          typeof data.username_changed_at === "string" &&
+          Number.isFinite(Date.parse(data.username_changed_at))
+            ? new Date(
+                Date.parse(data.username_changed_at) + USERNAME_CHANGE_COOLDOWN_MS,
+              ).toISOString()
+            : null,
+        usernameChangeError: "",
         leaderboardPublic: data.leaderboard_public !== false,
         joinedAt:
           typeof data.created_at === "string" && Number.isFinite(Date.parse(data.created_at))

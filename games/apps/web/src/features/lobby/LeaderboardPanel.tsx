@@ -262,58 +262,62 @@ export function LeaderboardPanel({ onBrowseGames }: { onBrowseGames: () => void 
           </Button>
         </div>
       )}
-      {state.board?.entries.length ? (
-        <ol
-          className="leaderboard-list"
-          ref={leaderboardListRef}
-          aria-label={`${selectedGame?.title ?? "Game"} ${period.replace("_", " ")} rankings`}
-        >
-          {state.board.entries.map((entry) => {
-            const isCurrentPlayer =
-              !!myEntry && entry.rank === myEntry.rank && entry.player_name === myEntry.player_name;
-            const podiumClass = entry.rank <= 3 ? ` leaderboard-rank--${entry.rank}` : "";
-            return (
-              <li
-                key={entry.player_name}
-                ref={isCurrentPlayer ? currentEntryRef : undefined}
-                className={isCurrentPlayer ? "is-current-player" : undefined}
-                aria-current={isCurrentPlayer ? "true" : undefined}
-              >
-                <span className={`leaderboard-rank${podiumClass}`}>{entry.rank}</span>
-                <span className="leaderboard-player">
-                  {entry.player_name}
-                  {isCurrentPlayer && <small> · You</small>}
-                </span>
-                <span className="leaderboard-record">
-                  <strong>{entry.wins}</strong>
-                  <small>wins</small>
-                </span>
-              </li>
-            );
-          })}
-        </ol>
-      ) : null}
-      {myEntry && (
-        <div
-          className={`leaderboard-current-standing${currentEntryVisible ? " is-obscured-by-list-row" : ""}`}
-          aria-label={`Your rank: ${myEntry.rank}`}
-          aria-hidden={currentEntryVisible}
-        >
-          <span
-            className={`leaderboard-rank${myEntry.rank <= 3 ? ` leaderboard-rank--${myEntry.rank}` : ""}`}
+      <div className={`leaderboard-list-region${state.board?.entries.length ? "" : " is-empty"}`}>
+        {state.board?.entries.length ? (
+          <ol
+            className="leaderboard-list"
+            ref={leaderboardListRef}
+            aria-label={`${selectedGame?.title ?? "Game"} ${period.replace("_", " ")} rankings`}
           >
-            {myEntry.rank}
-          </span>
-          <span className="leaderboard-current-player">
-            <strong>You</strong>
-            <small>{myEntry.player_name}</small>
-          </span>
-          <span className="leaderboard-record">
-            <strong>{myEntry.wins}</strong>
-            <small>wins</small>
-          </span>
-        </div>
-      )}
+            {state.board.entries.map((entry) => {
+              const isCurrentPlayer =
+                !!myEntry &&
+                entry.rank === myEntry.rank &&
+                entry.player_name === myEntry.player_name;
+              const podiumClass = entry.rank <= 3 ? ` leaderboard-rank--${entry.rank}` : "";
+              return (
+                <li
+                  key={entry.player_name}
+                  ref={isCurrentPlayer ? currentEntryRef : undefined}
+                  className={isCurrentPlayer ? "is-current-player" : undefined}
+                  aria-current={isCurrentPlayer ? "true" : undefined}
+                >
+                  <span className={`leaderboard-rank${podiumClass}`}>{entry.rank}</span>
+                  <span className="leaderboard-player">
+                    {entry.player_name}
+                    {isCurrentPlayer && <small> · You</small>}
+                  </span>
+                  <span className="leaderboard-record">
+                    <strong>{entry.wins}</strong>
+                    <small>wins</small>
+                  </span>
+                </li>
+              );
+            })}
+          </ol>
+        ) : null}
+        {myEntry && (
+          <div
+            className={`leaderboard-current-standing${currentEntryVisible ? " is-obscured-by-list-row" : ""}`}
+            aria-label={`Your rank: ${myEntry.rank}`}
+            aria-hidden={currentEntryVisible}
+          >
+            <span
+              className={`leaderboard-rank${myEntry.rank <= 3 ? ` leaderboard-rank--${myEntry.rank}` : ""}`}
+            >
+              {myEntry.rank}
+            </span>
+            <span className="leaderboard-current-player">
+              <strong>You</strong>
+              <small>{myEntry.player_name}</small>
+            </span>
+            <span className="leaderboard-record">
+              <strong>{myEntry.wins}</strong>
+              <small>wins</small>
+            </span>
+          </div>
+        )}
+      </div>
       {state.board?.cutoff_date && (
         <p className="leaderboard-cutoff">
           Results through{" "}

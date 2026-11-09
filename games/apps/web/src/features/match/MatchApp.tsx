@@ -136,6 +136,8 @@ export default function MatchApp({
       : null;
   const optionsExpanded = match.onlineDialog?.optionsExpanded ?? false;
   const onlineDialogMode = match.onlineDialog?.mode ?? null;
+  const supportsIdentityChoice =
+    onlineDialogMode === "create" || onlineDialogMode === "join" || onlineDialogMode === "opponent";
   const onlineDialogKey = match.onlineDialog ? `${match.gameId}:${onlineDialogMode}` : null;
   const onlineGuideOpen = onlineDialogKey !== null && onlineGuideKeyOpen === onlineDialogKey;
   const chatLength = Array.from(chatText.normalize("NFC").replace(/\s+/gu, " ").trim()).length;
@@ -149,20 +151,26 @@ export default function MatchApp({
   const boardReviewDialog = resultBoardReview ? match.dialog : null;
 
   useEffect(() => {
-    if (onlineDialogMode === "join" && previousOnlineDialogMode.current !== "join")
+    if (supportsIdentityChoice && previousOnlineDialogMode.current !== onlineDialogMode)
       joinIdentityTouched.current = false;
     previousOnlineDialogMode.current = onlineDialogMode;
-  }, [onlineDialogMode]);
+  }, [onlineDialogMode, supportsIdentityChoice]);
 
   useEffect(() => {
     if (
-      onlineDialogMode === "join" &&
+      supportsIdentityChoice &&
       account.status === "signed-in" &&
       !joinIdentityTouched.current &&
       match.onlineDialog?.joinAsGuest
     )
       controller.updateOnlineForm("joinAsGuest", false);
-  }, [account.status, controller, match.onlineDialog?.joinAsGuest, onlineDialogMode]);
+  }, [
+    account.status,
+    controller,
+    match.onlineDialog?.joinAsGuest,
+    onlineDialogMode,
+    supportsIdentityChoice,
+  ]);
   const onMovePresentationChange = useCallback((presentation: ReversiMovePresentation | null) => {
     setMovePresentation(presentation);
     if (moveCueClearTimer.current !== null) window.clearTimeout(moveCueClearTimer.current);
@@ -525,9 +533,9 @@ export default function MatchApp({
                 <span className="player-copy">
                   <span className="player-name-line">
                     <span className="player-name">{player.name}</span>
-                    {player.opponentNote && (
-                      <span className="player-opponent-note">{player.opponentNote}</span>
-                    )}
+                    <span className="player-score" id={`score-${player.seat}`}>
+                      {player.score}
+                    </span>
                   </span>
                   <span className="player-status-line" aria-live="polite">
                     {getPlayerStatusLabel(match, player, activeMovePresentation)}
@@ -549,11 +557,6 @@ export default function MatchApp({
                           context="to receive the move"
                         />
                       )}
-                  </span>
-                </span>
-                <span className="player-row-trailing">
-                  <span className="player-score" id={`score-${player.seat}`}>
-                    {player.score}
                   </span>
                 </span>
               </div>
@@ -1148,13 +1151,19 @@ export default function MatchApp({
                 match.onlineDialog.mode === "join" ||
                 match.onlineDialog.mode === "opponent") && (
                 <>
-                  {match.onlineDialog.mode === "join" && account.status === "signed-in" && (
+                  {supportsIdentityChoice && account.status === "signed-in" && (
                     <fieldset className="join-identity-options">
-                      <legend>Join as</legend>
+                      <legend>
+                        {match.onlineDialog.mode === "join"
+                          ? "Join as"
+                          : match.onlineDialog.mode === "create"
+                            ? "Create as"
+                            : "Play as"}
+                      </legend>
                       <label>
                         <input
                           type="radio"
-                          name="join-identity"
+                          name="match-identity"
                           checked={!match.onlineDialog.joinAsGuest}
                           onChange={() => {
                             joinIdentityTouched.current = true;
@@ -1168,7 +1177,7 @@ export default function MatchApp({
                       <label>
                         <input
                           type="radio"
-                          name="join-identity"
+                          name="match-identity"
                           checked={match.onlineDialog.joinAsGuest}
                           onChange={() => {
                             joinIdentityTouched.current = true;
@@ -1179,56 +1188,58 @@ export default function MatchApp({
                       </label>
                     </fieldset>
                   )}
-                  {match.onlineDialog.mode === "join" && account.status === "loading" && (
+                  {supportsIdentityChoice && account.status === "loading" && (
                     <p className="join-identity-status" role="status">
                       Checking sign-in…
                     </p>
                   )}
-                  {account.status === "signed-in" && match.onlineDialog.mode !== "join" ? (
-                    <div className="player-name-field account-match-name">
-                      <span className="account-match-label">Playing as</span>
-                      <strong>@{account.username}</strong>
-                      <small>Your account username is used in this match.</small>
-                    </div>
-                  ) : account.status === "signed-in" && !match.onlineDialog.joinAsGuest ? (
-                    <div className="player-name-field account-match-name">
-                      <span className="account-match-label">Playing as</span>
-                      <strong>@{account.username}</strong>
-                    </div>
-                  ) : (
-                    <div className="player-name-field">
-                      <label htmlFor="player-name-input">
-                        Your name <span>Optional</span>
-                      </label>
-                      <input
-                        id="player-name-input"
-                        type="text"
-                        maxLength={24}
-                        autoComplete="nickname"
-                        autoCapitalize="words"
-                        aria-describedby={
-                          match.onlineDialog.nameInvalid
-                            ? "player-name-hint online-error"
-                            : "player-name-hint"
-                        }
-                        aria-invalid={match.onlineDialog.nameInvalid || undefined}
-                        value={match.onlineDialog.name}
-                        onChange={(event) =>
-                          controller.updateOnlineForm("name", event.currentTarget.value)
-                        }
-                        placeholder="e.g. Swift Fox 42"
-                      />
-                      <small id="player-name-hint">
-                        Leave blank for a random name. Names must differ in a match.
-                      </small>
-                      {match.onlineDialog.mode === "join" && match.onlineDialog.joinAsGuest && (
-                        <small className="join-identity-status">
-                          Joining as a guest. Results stay on this device.
+                  <div
+                    className={
+                      supportsIdentityChoice && account.status === "signed-in"
+                        ? "identity-choice-details"
+                        : undefined
+                    }
+                  >
+                    {account.status === "signed-in" && !match.onlineDialog.joinAsGuest ? (
+                      <div className="identity-choice-note" aria-live="polite">
+                        Using your account for this match.
+                      </div>
+                    ) : (
+                      <div className="player-name-field">
+                        <label htmlFor="player-name-input">
+                          Your name <span>Optional</span>
+                        </label>
+                        <input
+                          id="player-name-input"
+                          type="text"
+                          maxLength={24}
+                          autoComplete="nickname"
+                          autoCapitalize="words"
+                          aria-describedby={
+                            match.onlineDialog.nameInvalid
+                              ? "player-name-hint online-error"
+                              : "player-name-hint"
+                          }
+                          aria-invalid={match.onlineDialog.nameInvalid || undefined}
+                          value={match.onlineDialog.name}
+                          onChange={(event) =>
+                            controller.updateOnlineForm("name", event.currentTarget.value)
+                          }
+                          placeholder="e.g. Swift Fox 42"
+                        />
+                        <small id="player-name-hint">
+                          Leave blank for a random name. Names must differ in a match.
                         </small>
-                      )}
-                    </div>
-                  )}
-                  {match.onlineDialog.mode === "join" &&
+                        {supportsIdentityChoice && match.onlineDialog.joinAsGuest && (
+                          <small className="join-identity-status">
+                            Guest results stay on this device. They won’t appear in account history
+                            or rankings.
+                          </small>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                  {supportsIdentityChoice &&
                     (account.status === "signed-out" || account.status === "error") && (
                       <div className="join-account-signin">
                         <span>Have an account?</span>
@@ -1236,7 +1247,9 @@ export default function MatchApp({
                           type="button"
                           disabled={account.busy}
                           onClick={() =>
-                            void accountSession.signInWithGoogle({ preserveMatchLink: true })
+                            void accountSession.signInWithGoogle({
+                              preserveMatchLink: match.onlineDialog?.mode === "join",
+                            })
                           }
                         >
                           {account.busy ? "Opening Google…" : "Sign in with Google"}
@@ -1370,10 +1383,14 @@ export default function MatchApp({
                 <button
                   className="dialog-primary"
                   type="button"
-                  disabled={match.onlineDialog.busy}
+                  disabled={match.onlineDialog.busy || account.status === "loading"}
                   onClick={controller.submitCreate}
                 >
-                  {match.onlineDialog.busy ? "Creating…" : "Create match"}
+                  {account.status === "loading"
+                    ? "Checking sign-in…"
+                    : match.onlineDialog.busy
+                      ? "Creating…"
+                      : "Create match"}
                 </button>
               )}
               {match.onlineDialog.mode === "join" && (
@@ -1394,10 +1411,14 @@ export default function MatchApp({
                 <button
                   className="dialog-primary"
                   type="button"
-                  disabled={match.onlineDialog.busy}
+                  disabled={match.onlineDialog.busy || account.status === "loading"}
                   onClick={controller.submitOpponent}
                 >
-                  {match.onlineDialog.busy ? "Starting…" : "Start match"}
+                  {account.status === "loading"
+                    ? "Checking sign-in…"
+                    : match.onlineDialog.busy
+                      ? "Starting…"
+                      : "Start match"}
                 </button>
               )}
               {match.onlineDialog.mode === "retry" && (

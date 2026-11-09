@@ -214,7 +214,6 @@ export function createMatchViewSnapshot(input: MatchViewModelInput): MatchViewSn
     return {
       seat,
       name: isOnline && seat === activeSession?.seat && name !== "You" ? `${name} · You` : name,
-      opponentNote: null,
       isSelf: isOnline && seat === activeSession?.seat,
       seatLabel,
       score: Math.max(0, (displayedWins[seat] ?? 0) - pendingWin),

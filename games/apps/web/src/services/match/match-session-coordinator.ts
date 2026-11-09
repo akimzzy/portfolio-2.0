@@ -106,6 +106,7 @@ export class MatchSessionCoordinator {
       visibility: string;
       seriesTarget: number;
       displayName: string;
+      identityMode?: "account" | "guest";
     }>,
   ): Promise<CreateRoomResolution> {
     const reservation = await this.reserveSlot("creating");
@@ -149,6 +150,7 @@ export class MatchSessionCoordinator {
       seriesTarget: number;
       matchAnySeries?: boolean;
       displayName: string;
+      identityMode?: "account" | "guest";
     }>,
   ): Promise<CreateRoomResolution> {
     const reservation = await this.reserveSlot("creating");
@@ -195,6 +197,7 @@ export class MatchSessionCoordinator {
       seriesTarget: number;
       displayName: string;
       opponentName: string;
+      identityMode?: "account" | "guest";
     }>,
   ): Promise<CreateRoomResolution> {
     const reservation = await this.reserveSlot("creating");
