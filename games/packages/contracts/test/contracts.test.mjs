@@ -3,6 +3,7 @@ import test from "node:test";
 import { readFile } from "node:fs/promises";
 import {
   IN_HOUSE_PLAYERS,
+  inHouseDifficultyForPlayer,
   PROTOCOL_VERSION,
   adaptTwoPlayerGame,
   createGameRegistry,
@@ -39,6 +40,18 @@ test("in-house roster is stable, unique, and matches the Supabase seed", async (
   assert.equal(new Set(IN_HOUSE_PLAYERS.map((player) => player.displayName)).size, 10);
   assert.ok(IN_HOUSE_PLAYERS.some((player) => player.displayName === "Chichi"));
   assert.ok(IN_HOUSE_PLAYERS.some((player) => /^\d+ /.test(player.displayName)));
+  assert.deepEqual(
+    Object.fromEntries(
+      ["easy", "medium", "hard", "very-hard"].map((difficulty) => [
+        difficulty,
+        IN_HOUSE_PLAYERS.filter((player) => player.difficulty === difficulty).length,
+      ]),
+    ),
+    { easy: 3, medium: 3, hard: 2, "very-hard": 2 },
+  );
+  for (const player of IN_HOUSE_PLAYERS)
+    assert.equal(inHouseDifficultyForPlayer(player.playerId), player.difficulty);
+  assert.equal(inHouseDifficultyForPlayer("house_unknown"), null);
   const migration = await readFile(
     new URL("../../../supabase/migrations/20261107204750_leaderboards.sql", import.meta.url),
     "utf8",

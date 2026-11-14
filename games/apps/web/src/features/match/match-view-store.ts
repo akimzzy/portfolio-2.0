@@ -39,6 +39,7 @@ export type OnlineDialogView = {
   matchAnySeries: boolean;
   visibility: "public" | "invite";
   optionsExpanded: boolean;
+  invitedFriendshipIds: string[];
   inviteLink: string;
   copyLabel: string;
   busy: boolean;

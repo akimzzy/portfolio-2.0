@@ -1,9 +1,13 @@
-import type { ConnectFourOpponentId } from "./opponents.js";
+import {
+  isConnectFourDifficulty,
+  type ConnectFourDifficulty,
+  type ConnectFourOpponentId,
+} from "./opponents.js";
 import type { ConnectFourState } from "./index.js";
 
 type Candidate = { column: number; score: number };
 type Profile = { depth: number; nodes: number; center: number; attack: number; defense: number };
-export const CONNECT_FOUR_AI_ENGINE_VERSION = 2 as const;
+export const CONNECT_FOUR_AI_ENGINE_VERSION = 3 as const;
 
 const PROFILES: Record<ConnectFourOpponentId, Profile> = {
   standard: { depth: 4, nodes: 1_050, center: 3, attack: 1, defense: 1 },
@@ -17,6 +21,13 @@ const PROFILES_V2: Record<ConnectFourOpponentId, Profile> = {
   expert: { depth: 6, nodes: 1_450, center: 3, attack: 2, defense: 2 },
   defensive: { depth: 5, nodes: 1_300, center: 2, attack: 1, defense: 4 },
   aggressive: { depth: 4, nodes: 1_300, center: 3, attack: 4, defense: 1 },
+};
+
+const PROFILES_V3: Record<ConnectFourDifficulty, Profile> = {
+  easy: { depth: 0, nodes: 1, center: 1, attack: 1, defense: 1 },
+  medium: { depth: 2, nodes: 520, center: 2, attack: 1, defense: 2 },
+  hard: { depth: 4, nodes: 1_050, center: 3, attack: 2, defense: 3 },
+  "very-hard": { depth: 6, nodes: 1_450, center: 3, attack: 2, defense: 2 },
 };
 
 const ROWS = 6;
@@ -336,6 +347,88 @@ function chooseConnectFourMoveV2(
   return nearBest[tieIndex(seed, ply, nearBest.length)]!.column;
 }
 
+/** Skill-tiered selector. Work is local and has a strict per-move node budget. */
+function chooseConnectFourMoveV3(
+  state: ConnectFourState,
+  seat: "first" | "second",
+  difficulty: ConnectFourDifficulty,
+  seed: number,
+): number {
+  const board = Int8Array.from(
+    state.board.flatMap((row) =>
+      row.map((cell) => (cell === "first" ? 1 : cell === "second" ? 2 : 0)),
+    ),
+  );
+  const heights = Array.from({ length: COLUMNS }, (_, column) =>
+    state.board.reduce((sum, row) => sum + (row[column] === null ? 0 : 1), 0),
+  );
+  const legal = legalColumns(heights);
+  if (!legal.length) throw new RangeError("No legal Connect Four move is available.");
+  const player = seatNumber(seat);
+  const opponent = player === 1 ? 2 : 1;
+  const ply = state.moves.length;
+  const profile = PROFILES_V3[difficulty];
+
+  const wins = winningColumns(board, heights, player);
+  if (wins.length) return wins[tieIndex(seed, ply, wins.length)]!;
+  const threats = winningColumns(board, heights, opponent);
+  if (threats.length === 1) return threats[0]!;
+
+  const safe: number[] = [];
+  const forkSafe: number[] = [];
+  const forks: number[] = [];
+  for (const column of legal) {
+    const row = drop(board, heights, column, player);
+    const allowsImmediateWin = winningColumns(board, heights, opponent).length > 0;
+    if (!allowsImmediateWin) {
+      safe.push(column);
+      if (difficulty === "hard" || difficulty === "very-hard") {
+        if (winningColumns(board, heights, player).length >= 2) forks.push(column);
+        if (!opponentCanCreateFork(board, heights, opponent, player)) forkSafe.push(column);
+      }
+    }
+    undo(board, heights, column, row);
+  }
+
+  if (forks.length) return forks[tieIndex(seed, ply, forks.length)]!;
+  const candidates =
+    difficulty === "hard" || difficulty === "very-hard"
+      ? forkSafe.length
+        ? forkSafe
+        : safe.length
+          ? safe
+          : legal
+      : safe.length
+        ? safe
+        : legal;
+  const scores: Candidate[] = [];
+  let best = -Infinity;
+  const perCandidateBudget = Math.max(1, Math.ceil(profile.nodes / candidates.length));
+  for (const column of candidates) {
+    const row = drop(board, heights, column, player);
+    const budget = { nodes: 0, maximum: perCandidateBudget };
+    const value = isWin(board, row, column, player)
+      ? WIN
+      : search(
+          board,
+          heights,
+          opponent,
+          player,
+          profile.depth,
+          -Infinity,
+          Infinity,
+          profile,
+          budget,
+        );
+    undo(board, heights, column, row);
+    scores.push({ column, score: value });
+    best = Math.max(best, value);
+  }
+  const tolerance = difficulty === "easy" ? 36 : difficulty === "medium" ? 12 : 3;
+  const nearBest = scores.filter((candidate) => candidate.score >= best - tolerance);
+  return nearBest[tieIndex(seed, ply, nearBest.length)]!.column;
+}
+
 type ConnectFourMoveSelector = typeof chooseConnectFourMoveV1;
 const MOVE_SELECTORS: Readonly<Record<number, ConnectFourMoveSelector>> = Object.freeze({
   1: chooseConnectFourMoveV1,
@@ -343,34 +436,45 @@ const MOVE_SELECTORS: Readonly<Record<number, ConnectFourMoveSelector>> = Object
 });
 
 export function supportsConnectFourAiEngineVersion(engineVersion: number): boolean {
-  return Object.hasOwn(MOVE_SELECTORS, engineVersion);
+  return (
+    engineVersion === CONNECT_FOUR_AI_ENGINE_VERSION || Object.hasOwn(MOVE_SELECTORS, engineVersion)
+  );
 }
 
 /** Resolve a persisted engine version so active matches survive later AI upgrades. */
 export function chooseConnectFourMoveForVersion(
   state: ConnectFourState,
   seat: "first" | "second",
-  profileId: ConnectFourOpponentId,
+  profileId: ConnectFourOpponentId | ConnectFourDifficulty,
   seed: number,
   engineVersion: number,
 ): number {
+  if (engineVersion === CONNECT_FOUR_AI_ENGINE_VERSION) {
+    if (!isConnectFourDifficulty(profileId))
+      throw new RangeError("Unsupported Connect Four difficulty.");
+    return chooseConnectFourMoveV3(state, seat, profileId, seed);
+  }
   const selector = MOVE_SELECTORS[engineVersion];
   if (!selector)
     throw new RangeError(`Unsupported Connect Four AI engine version: ${engineVersion}`);
+  if (isConnectFourDifficulty(profileId))
+    throw new RangeError("Legacy Connect Four engine requires a legacy opponent profile.");
   return selector(state, seat, profileId, seed);
 }
 
 export function chooseConnectFourMove(
   state: ConnectFourState,
   seat: "first" | "second",
-  profileId: ConnectFourOpponentId,
+  profileId: ConnectFourOpponentId | ConnectFourDifficulty,
   seed: number,
 ): number {
-  return chooseConnectFourMoveForVersion(
-    state,
-    seat,
-    profileId,
-    seed,
-    CONNECT_FOUR_AI_ENGINE_VERSION,
-  );
+  if (isConnectFourDifficulty(profileId))
+    return chooseConnectFourMoveForVersion(
+      state,
+      seat,
+      profileId,
+      seed,
+      CONNECT_FOUR_AI_ENGINE_VERSION,
+    );
+  return chooseConnectFourMoveForVersion(state, seat, profileId, seed, 2);
 }

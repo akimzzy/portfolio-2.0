@@ -1,4 +1,9 @@
-import { createClient, type Session, type SupabaseClient } from "@supabase/supabase-js";
+import {
+  createClient,
+  type RealtimeChannel,
+  type Session,
+  type SupabaseClient,
+} from "@supabase/supabase-js";
 import {
   GUEST_HISTORY_STORAGE_KEY,
   readGuestHistory,
@@ -42,15 +47,41 @@ export type GameHistoryDetails = Readonly<{
   rounds: readonly GameHistoryRound[];
   error: string;
 }>;
-export type AccountLeaderboardRank = Readonly<{ game_id: string; rank: number }>;
+export type FriendRecord = Readonly<{
+  id: string;
+  username: string;
+  since: string;
+  seriesPlayed: number;
+  wins: number;
+  losses: number;
+}>;
+export type FriendMatchHistoryPage = Readonly<{
+  matches: GameHistoryEntry[];
+  hasMore: boolean;
+}>;
+export type FriendRequest = Readonly<{ id: string; username: string; requestedAt: string }>;
+export type FriendMatchInvite = Readonly<{
+  id: string;
+  matchId: string;
+  gameId: string;
+  seriesTarget: 1 | 2 | 3;
+  inviteToken: string;
+  senderUsername: string;
+  createdAt: string;
+  expiresAt: string;
+}>;
+export type FriendLookup = Readonly<{
+  username: string;
+  status: "pending" | "accepted" | "declined" | "cancelled" | "removed" | null;
+  requestedByYou: boolean | null;
+}>;
+export type FriendRequestResponse = "accept" | "decline" | "cancel";
 export type AccountSnapshot = Readonly<{
   status: "unconfigured" | "loading" | "signed-out" | "profile-required" | "signed-in" | "error";
   username: string | null;
   usernameChangeAvailableAt: string | null;
   usernameChangeError: string;
   leaderboardPublic: boolean;
-  leaderboardRanks: AccountLeaderboardRank[];
-  leaderboardRanksStatus: "idle" | "loading" | "ready" | "error";
   joinedAt: string | null;
   busy: boolean;
   error: string;
@@ -68,6 +99,20 @@ export type AccountSnapshot = Readonly<{
   guestHistoryCount: number;
   guestHistoryImporting: boolean;
   guestHistoryError: string;
+  friends: FriendRecord[];
+  incomingFriendRequests: FriendRequest[];
+  outgoingFriendRequests: FriendRequest[];
+  incomingFriendRequestCount: number | null;
+  incomingMatchInvites: FriendMatchInvite[];
+  matchInvitesStatus: "idle" | "loading" | "ready" | "error";
+  matchInvitesError: string;
+  matchInvitesFetchedAt: number | null;
+  matchInvitesBusyId: string | null;
+  friendsStatus: "idle" | "loading" | "ready" | "error";
+  friendsRefreshing: boolean;
+  friendsError: string;
+  friendsActionBusy: boolean;
+  friendsFetchedAt: number | null;
 }>;
 
 const USERNAME_PATTERN = /^[A-Za-z][A-Za-z0-9_]{2,19}$/;
@@ -78,15 +123,14 @@ const OAUTH_MATCH_RETURN_KEY = "games.oauth-match-return";
 const OAUTH_MATCH_RETURN_TTL_MS = 15 * 60_000;
 const HISTORY_INITIAL_LIMIT = 4;
 const HISTORY_PAGE_SIZE = 10;
-const LEADERBOARD_RANKS_CACHE_TTL_MS = 5 * 60_000;
+const FRIENDS_CACHE_TTL_MS = 60_000;
+const MATCH_INVITES_CACHE_TTL_MS = 30_000;
 const initialSnapshot: AccountSnapshot = {
   status: "loading",
   username: null,
   usernameChangeAvailableAt: null,
   usernameChangeError: "",
   leaderboardPublic: true,
-  leaderboardRanks: [],
-  leaderboardRanksStatus: "idle",
   joinedAt: null,
   busy: false,
   error: "",
@@ -104,6 +148,20 @@ const initialSnapshot: AccountSnapshot = {
   guestHistoryCount: 0,
   guestHistoryImporting: false,
   guestHistoryError: "",
+  friends: [],
+  incomingFriendRequests: [],
+  outgoingFriendRequests: [],
+  incomingFriendRequestCount: null,
+  incomingMatchInvites: [],
+  matchInvitesStatus: "idle",
+  matchInvitesError: "",
+  matchInvitesFetchedAt: null,
+  matchInvitesBusyId: null,
+  friendsStatus: "idle",
+  friendsRefreshing: false,
+  friendsError: "",
+  friendsActionBusy: false,
+  friendsFetchedAt: null,
 };
 
 const HISTORY_FIELDS =
@@ -160,6 +218,24 @@ function replayRelationUnavailable(error: unknown): boolean {
   if (!error || typeof error !== "object") return false;
   const code = (error as { code?: unknown }).code;
   return code === "PGRST200" || code === "PGRST201" || code === "PGRST205" || code === "42P01";
+}
+
+function friendErrorMessage(rawMessage: string): string {
+  const message = rawMessage.toLowerCase();
+  if (message.includes("not_authenticated")) return "Sign in again to manage friends.";
+  if (message.includes("invalid_username"))
+    return "Use a username with 3–20 letters, numbers, or underscores.";
+  if (message.includes("player_not_found")) return "No player found with that username.";
+  if (message.includes("already_friends")) return "You’re already friends.";
+  if (message.includes("request_already_sent")) return "Your request is already waiting for them.";
+  if (message.includes("incoming_request_exists"))
+    return "They’ve already sent you a request. Accept it below.";
+  if (message.includes("friend_request_unavailable"))
+    return "That request is no longer available. Refresh your friends list.";
+  if (message.includes("friendship_unavailable"))
+    return "That friendship is no longer available. Refresh your friends list.";
+  if (message.includes("not_allowed")) return "You can’t take that action on this request.";
+  return "That action couldn’t be completed. Check your connection and try again.";
 }
 
 function parseHistoryRound(value: unknown): GameHistoryRound | null {
@@ -225,6 +301,9 @@ export class AccountSession {
   private session: Session | null = null;
   private readonly listeners = new Set<() => void>();
   private authSubscription: { unsubscribe(): void } | null = null;
+  private friendRequestChannel: RealtimeChannel | null = null;
+  private friendRequestRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+  private friendRequestCountRequest = 0;
   private profileRequest = 0;
   private historyRequest = 0;
   private historyInFlight: Promise<void> | null = null;
@@ -235,10 +314,12 @@ export class AccountSession {
   private historyLoadedVersion = 0;
   private historyAttemptedVersion = 0;
   private historyReplayRelationSupported: boolean | null = null;
-  private leaderboardRanksUserId: string | null = null;
-  private leaderboardRanksFetchedAt: number | null = null;
-  private leaderboardRanksAttemptedAt: number | null = null;
-  private leaderboardRanksInFlight: Promise<void> | null = null;
+  private friendsUserId: string | null = null;
+  private friendsRequest = 0;
+  private friendsInFlight: Promise<void> | null = null;
+  private matchInvitesRequest = 0;
+  private matchInvitesInFlight: Promise<void> | null = null;
+  private matchInvitesUserId: string | null = null;
   private readonly onGuestHistoryStorage = (event: StorageEvent) => {
     if (event.key === GUEST_HISTORY_STORAGE_KEY) this.refreshGuestHistory();
   };
@@ -274,11 +355,20 @@ export class AccountSession {
         previousUserId === session.user.id &&
         ["INITIAL_SESSION", "SIGNED_IN", "TOKEN_REFRESHED"].includes(_event) &&
         (this.snapshot.status === "signed-in" || this.snapshot.status === "profile-required")
-      )
+      ) {
+        if (!this.friendRequestChannel) {
+          const userId = session.user.id;
+          queueMicrotask(() => {
+            if (this.session?.user.id === userId && !this.friendRequestChannel)
+              this.startFriendRequestUpdates(userId);
+          });
+        }
         return;
+      }
       if (!session || (previousUserId && previousUserId !== session.user.id)) this.clearHistory();
       this.profileRequest += 1;
       if (!session) {
+        this.stopFriendRequestUpdates();
         this.update({
           status: "signed-out",
           username: null,
@@ -289,6 +379,12 @@ export class AccountSession {
           busy: false,
         });
         return;
+      }
+      if (previousUserId !== session.user.id) {
+        const userId = session.user.id;
+        queueMicrotask(() => {
+          if (this.session?.user.id === userId) this.startFriendRequestUpdates(userId);
+        });
       }
       this.update({
         status: "loading",
@@ -308,6 +404,7 @@ export class AccountSession {
 
   stop(): void {
     this.profileRequest += 1;
+    this.stopFriendRequestUpdates();
     this.authSubscription?.unsubscribe();
     this.authSubscription = null;
     if (typeof window !== "undefined")
@@ -435,8 +532,6 @@ export class AccountSession {
         usernameChangeAvailableAt: null,
         usernameChangeError: "",
         leaderboardPublic: true,
-        leaderboardRanks: [],
-        leaderboardRanksStatus: "idle",
         joinedAt: new Date().toISOString(),
         busy: false,
         error: "",
@@ -672,6 +767,480 @@ export class AccountSession {
     }
   }
 
+  async loadFriends(force = false): Promise<void> {
+    const userId = this.session?.user.id;
+    if (!this.client || !userId || this.snapshot.status !== "signed-in") return;
+    if (this.friendsInFlight && this.friendsUserId === userId) return this.friendsInFlight;
+    if (
+      !force &&
+      this.friendsUserId === userId &&
+      this.snapshot.friendsFetchedAt !== null &&
+      Date.now() - this.snapshot.friendsFetchedAt < FRIENDS_CACHE_TTL_MS
+    )
+      return;
+
+    this.friendsUserId = userId;
+    const request = ++this.friendsRequest;
+    const hasCachedFriends =
+      this.snapshot.friendsStatus === "ready" || this.snapshot.friendsFetchedAt !== null;
+    this.update({
+      friendsStatus: hasCachedFriends ? "ready" : "loading",
+      friendsRefreshing: hasCachedFriends,
+      friendsError: "",
+    });
+    const load = (async () => {
+      try {
+        const { data, error } = await this.client!.rpc("get_friends");
+        if (error) throw error;
+        if (request !== this.friendsRequest || this.session?.user.id !== userId) return;
+        const response = data && typeof data === "object" ? (data as Record<string, unknown>) : {};
+        const friends = Array.isArray(response.friends)
+          ? response.friends.flatMap((item): FriendRecord[] => {
+              if (!item || typeof item !== "object") return [];
+              const row = item as Record<string, unknown>;
+              if (
+                typeof row.id !== "string" ||
+                typeof row.username !== "string" ||
+                typeof row.since !== "string" ||
+                !Number.isFinite(Date.parse(row.since)) ||
+                !Number.isSafeInteger(row.series_played) ||
+                !Number.isSafeInteger(row.wins) ||
+                !Number.isSafeInteger(row.losses)
+              )
+                return [];
+              return [
+                {
+                  id: row.id,
+                  username: row.username,
+                  since: row.since,
+                  seriesPlayed: row.series_played as number,
+                  wins: row.wins as number,
+                  losses: row.losses as number,
+                },
+              ];
+            })
+          : [];
+        const parseRequests = (value: unknown): FriendRequest[] =>
+          Array.isArray(value)
+            ? value.flatMap((item): FriendRequest[] => {
+                if (!item || typeof item !== "object") return [];
+                const row = item as Record<string, unknown>;
+                if (
+                  typeof row.id !== "string" ||
+                  typeof row.username !== "string" ||
+                  typeof row.requested_at !== "string" ||
+                  !Number.isFinite(Date.parse(row.requested_at))
+                )
+                  return [];
+                return [{ id: row.id, username: row.username, requestedAt: row.requested_at }];
+              })
+            : [];
+        this.update({
+          friends,
+          incomingFriendRequests: parseRequests(response.incoming),
+          outgoingFriendRequests: parseRequests(response.outgoing),
+          friendsStatus: "ready",
+          friendsError: "",
+          friendsFetchedAt: Date.now(),
+        });
+      } catch {
+        if (request !== this.friendsRequest || this.session?.user.id !== userId) return;
+        this.update({
+          friendsStatus: hasCachedFriends ? "ready" : "error",
+          friendsError: hasCachedFriends
+            ? "Could not refresh friends. Showing the saved list."
+            : "Friends could not load. Check your connection and try again.",
+        });
+      }
+    })();
+    this.friendsInFlight = load;
+    try {
+      await load;
+    } finally {
+      if (this.friendsInFlight === load) this.friendsInFlight = null;
+      if (
+        request === this.friendsRequest &&
+        this.session?.user.id === userId &&
+        this.snapshot.friendsRefreshing
+      ) {
+        this.update({ friendsRefreshing: false });
+      }
+    }
+  }
+
+  async loadMatchInvites(force = false): Promise<void> {
+    const userId = this.session?.user.id;
+    if (!this.client || !userId || this.snapshot.status !== "signed-in") return;
+    if (this.matchInvitesInFlight && this.matchInvitesUserId === userId)
+      return this.matchInvitesInFlight;
+    if (
+      !force &&
+      this.matchInvitesUserId === userId &&
+      this.snapshot.matchInvitesFetchedAt !== null &&
+      Date.now() - this.snapshot.matchInvitesFetchedAt < MATCH_INVITES_CACHE_TTL_MS
+    )
+      return;
+
+    this.matchInvitesUserId = userId;
+    const request = ++this.matchInvitesRequest;
+    const hasCachedInvites = this.snapshot.matchInvitesFetchedAt !== null;
+    this.update({
+      matchInvitesStatus: hasCachedInvites ? "ready" : "loading",
+      matchInvitesError: "",
+    });
+    const load = (async () => {
+      try {
+        const { data, error } = await this.client!.rpc("get_private_match_invites");
+        if (error) throw error;
+        if (request !== this.matchInvitesRequest || this.session?.user.id !== userId) return;
+        const invites = Array.isArray(data)
+          ? data.flatMap((value): FriendMatchInvite[] => {
+              if (!value || typeof value !== "object") return [];
+              const row = value as Record<string, unknown>;
+              if (
+                typeof row.id !== "string" ||
+                typeof row.match_id !== "string" ||
+                !/^[A-Za-z0-9_-]{22}$/.test(row.match_id) ||
+                typeof row.game_id !== "string" ||
+                !["connect-four", "reversi"].includes(row.game_id) ||
+                !Number.isSafeInteger(row.series_target) ||
+                ![1, 2, 3].includes(row.series_target as number) ||
+                typeof row.invite_token !== "string" ||
+                !/^[A-Za-z0-9_-]{43}$/.test(row.invite_token) ||
+                typeof row.sender_username !== "string" ||
+                typeof row.created_at !== "string" ||
+                !Number.isFinite(Date.parse(row.created_at)) ||
+                typeof row.expires_at !== "string" ||
+                !Number.isFinite(Date.parse(row.expires_at))
+              )
+                return [];
+              return [
+                {
+                  id: row.id,
+                  matchId: row.match_id,
+                  gameId: row.game_id,
+                  seriesTarget: row.series_target as 1 | 2 | 3,
+                  inviteToken: row.invite_token,
+                  senderUsername: row.sender_username,
+                  createdAt: row.created_at,
+                  expiresAt: row.expires_at,
+                },
+              ];
+            })
+          : [];
+        this.update({
+          incomingMatchInvites: invites,
+          matchInvitesStatus: "ready",
+          matchInvitesError: "",
+          matchInvitesFetchedAt: Date.now(),
+        });
+      } catch {
+        if (request !== this.matchInvitesRequest || this.session?.user.id !== userId) return;
+        this.update({
+          matchInvitesStatus: hasCachedInvites ? "ready" : "error",
+          matchInvitesError: hasCachedInvites
+            ? "Could not refresh match invites. Showing the saved list."
+            : "Match invites could not load. Check your connection and try again.",
+        });
+      }
+    })();
+    this.matchInvitesInFlight = load;
+    try {
+      await load;
+    } finally {
+      if (this.matchInvitesInFlight === load) this.matchInvitesInFlight = null;
+    }
+  }
+
+  async dismissMatchInvite(inviteId: string): Promise<boolean> {
+    if (!this.client || !this.session || this.snapshot.status !== "signed-in") return false;
+    if (this.snapshot.matchInvitesBusyId) return false;
+    this.update({ matchInvitesBusyId: inviteId, matchInvitesError: "" });
+    try {
+      const { data, error } = await this.client.rpc("dismiss_private_match_invite", {
+        p_invite_id: inviteId,
+      });
+      if (error) throw error;
+      if (data === true)
+        this.update({
+          incomingMatchInvites: this.snapshot.incomingMatchInvites.filter(
+            (invite) => invite.id !== inviteId,
+          ),
+          incomingFriendRequestCount: Math.max(
+            0,
+            (this.snapshot.incomingFriendRequestCount ?? 1) - 1,
+          ),
+        });
+      return data === true;
+    } catch {
+      this.update({ matchInvitesError: "Invite could not be dismissed. Try again." });
+      return false;
+    } finally {
+      this.update({ matchInvitesBusyId: null });
+    }
+  }
+
+  async loadFriendMatchHistory(
+    friendshipId: string,
+    before?: Readonly<{ completedAt: string; completionId: string }>,
+  ): Promise<FriendMatchHistoryPage> {
+    const userId = this.session?.user.id;
+    if (!this.client || !userId || this.snapshot.status !== "signed-in")
+      throw new Error("Sign in to view match history.");
+
+    const { data, error } = await this.client.rpc("get_friend_match_history", {
+      p_friendship_id: friendshipId,
+      p_before_completed_at: before?.completedAt ?? null,
+      p_before_completion_id: before?.completionId ?? null,
+      p_page_size: 5,
+    });
+    if (error) {
+      if (this.session?.user.id !== userId) throw new Error("Your account changed. Try again.");
+      if (error.message.toLowerCase().includes("friendship_unavailable"))
+        throw new Error("Match history is available while you’re friends.");
+      throw new Error("Match history could not load. Try again.");
+    }
+    if (this.session?.user.id !== userId) throw new Error("Your account changed. Try again.");
+
+    const response = data && typeof data === "object" ? (data as Record<string, unknown>) : {};
+    const matches = Array.isArray(response.matches)
+      ? response.matches.flatMap((value): GameHistoryEntry[] => {
+          if (!value || typeof value !== "object") return [];
+          const row = value as Record<string, unknown>;
+          const parsed = parseHistoryEntry({
+            ...row,
+            record_source: "verified",
+            game_history_rounds: row.replay_available === true ? [{}] : [],
+          });
+          return parsed ? [parsed] : [];
+        })
+      : [];
+
+    return { matches, hasMore: response.has_more === true };
+  }
+
+  private startFriendRequestUpdates(userId: string): void {
+    this.stopFriendRequestUpdates();
+    if (!this.client) return;
+
+    let initialCountLoaded = false;
+    this.friendRequestChannel = this.client
+      .channel(`friend-requests:${userId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "friendships",
+          filter: `user_low_id=eq.${userId}`,
+        },
+        () => this.scheduleIncomingFriendRequestRefresh(userId),
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "friendships",
+          filter: `user_high_id=eq.${userId}`,
+        },
+        () => this.scheduleIncomingFriendRequestRefresh(userId),
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "private_match_invites",
+          filter: `recipient_id=eq.${userId}`,
+        },
+        () => this.scheduleIncomingFriendRequestRefresh(userId),
+      )
+      .subscribe((status) => {
+        if (status === "SUBSCRIBED") {
+          if (initialCountLoaded) this.scheduleIncomingFriendRequestRefresh(userId);
+          else {
+            initialCountLoaded = true;
+            void this.refreshIncomingFriendRequestCount(userId);
+          }
+        } else if (!initialCountLoaded && (status === "CHANNEL_ERROR" || status === "TIMED_OUT")) {
+          initialCountLoaded = true;
+          void this.refreshIncomingFriendRequestCount(userId);
+        }
+      });
+  }
+
+  private stopFriendRequestUpdates(): void {
+    if (this.friendRequestRefreshTimer !== null) {
+      clearTimeout(this.friendRequestRefreshTimer);
+      this.friendRequestRefreshTimer = null;
+    }
+    this.friendRequestCountRequest += 1;
+    if (this.friendRequestChannel) {
+      void this.client?.removeChannel(this.friendRequestChannel);
+      this.friendRequestChannel = null;
+    }
+  }
+
+  private scheduleIncomingFriendRequestRefresh(userId: string): void {
+    if (this.friendRequestRefreshTimer !== null) clearTimeout(this.friendRequestRefreshTimer);
+    this.friendRequestRefreshTimer = setTimeout(() => {
+      this.friendRequestRefreshTimer = null;
+      void this.refreshIncomingFriendRequestCount(userId);
+      if (this.snapshot.matchInvitesFetchedAt !== null) void this.loadMatchInvites(true);
+    }, 200);
+  }
+
+  private async refreshIncomingFriendRequestCount(userId: string): Promise<void> {
+    if (!this.client || this.session?.user.id !== userId) return;
+    const request = ++this.friendRequestCountRequest;
+    try {
+      const { data, error } = await this.client.rpc("get_incoming_friend_request_count");
+      if (
+        error ||
+        request !== this.friendRequestCountRequest ||
+        this.session?.user.id !== userId ||
+        !Number.isSafeInteger(data) ||
+        (data as number) < 0
+      )
+        return;
+      this.update({ incomingFriendRequestCount: data as number });
+    } catch {
+      // Keep the last known count; the realtime channel will retry after reconnecting.
+    }
+  }
+
+  async lookupFriend(username: string): Promise<FriendLookup | null> {
+    const cleaned = username.trim();
+    if (!this.client || !this.session || this.snapshot.status !== "signed-in")
+      throw new Error("Sign in to find players.");
+    if (!USERNAME_PATTERN.test(cleaned))
+      throw new Error("Use a username with 3–20 letters, numbers, or underscores.");
+    const { data, error } = await this.client.rpc("lookup_friend", {
+      requested_username: cleaned,
+    });
+    if (error) throw new Error(friendErrorMessage(error.message));
+    if (!data || typeof data !== "object") return null;
+    const row = data as Record<string, unknown>;
+    const allowedStatuses = ["pending", "accepted", "declined", "cancelled", "removed"];
+    if (
+      typeof row.username !== "string" ||
+      (row.status !== null && !allowedStatuses.includes(row.status as string)) ||
+      (row.requested_by_you !== null && typeof row.requested_by_you !== "boolean")
+    )
+      throw new Error("Player details could not be read. Try again.");
+    return {
+      username: row.username,
+      status: row.status as FriendLookup["status"],
+      requestedByYou: row.requested_by_you as boolean | null,
+    };
+  }
+
+  async sendFriendRequest(username: string): Promise<boolean> {
+    const userId = this.session?.user.id;
+    return this.runFriendAction(async () => {
+      const { data, error } = await this.client!.rpc("send_friend_request", {
+        requested_username: username.trim(),
+      });
+      if (error) throw new Error(friendErrorMessage(error.message));
+      if (this.session?.user.id !== userId) return;
+      const requestId =
+        data && typeof data === "object" ? (data as Record<string, unknown>).id : null;
+      if (typeof requestId === "string") {
+        this.update({
+          outgoingFriendRequests: [
+            ...this.snapshot.outgoingFriendRequests,
+            { id: requestId, username: username.trim(), requestedAt: new Date().toISOString() },
+          ],
+        });
+      }
+    });
+  }
+
+  async respondToFriendRequest(id: string, response: FriendRequestResponse): Promise<boolean> {
+    const userId = this.session?.user.id;
+    return this.runFriendAction(async () => {
+      const { error } = await this.client!.rpc("respond_to_friend_request", {
+        request_id: id,
+        response,
+      });
+      if (error) throw new Error(friendErrorMessage(error.message));
+      if (this.session?.user.id !== userId) return;
+      if (response === "cancel") {
+        this.update({
+          outgoingFriendRequests: this.snapshot.outgoingFriendRequests.filter(
+            (request) => request.id !== id,
+          ),
+        });
+        return;
+      }
+      const request = this.snapshot.incomingFriendRequests.find((item) => item.id === id);
+      this.update({
+        incomingFriendRequests: this.snapshot.incomingFriendRequests.filter(
+          (item) => item.id !== id,
+        ),
+        ...(response === "accept" && request
+          ? {
+              friends: [
+                ...this.snapshot.friends,
+                {
+                  id,
+                  username: request.username,
+                  since: new Date().toISOString(),
+                  seriesPlayed: 0,
+                  wins: 0,
+                  losses: 0,
+                },
+              ],
+            }
+          : {}),
+      });
+    });
+  }
+
+  async removeFriend(id: string): Promise<boolean> {
+    const userId = this.session?.user.id;
+    return this.runFriendAction(async () => {
+      const { error } = await this.client!.rpc("remove_friend", { friendship_id: id });
+      if (error) throw new Error(friendErrorMessage(error.message));
+      if (this.session?.user.id !== userId) return;
+      this.update({
+        friends: this.snapshot.friends.filter((friend) => friend.id !== id),
+      });
+    });
+  }
+
+  private async runFriendAction(action: () => Promise<void>): Promise<boolean> {
+    const userId = this.session?.user.id;
+    if (!this.client || !userId || this.snapshot.status !== "signed-in") {
+      this.update({ friendsError: "Sign in again to manage friends." });
+      return false;
+    }
+    if (this.snapshot.friendsActionBusy) return false;
+    this.friendsRequest += 1;
+    this.friendsInFlight = null;
+    this.update({ friendsActionBusy: true, friendsError: "" });
+    try {
+      await action();
+      if (this.session?.user.id !== userId) return false;
+      this.update({ friendsActionBusy: false });
+      await this.loadFriends(true);
+      return true;
+    } catch (error) {
+      if (this.session?.user.id !== userId) return false;
+      this.update({
+        friendsActionBusy: false,
+        friendsError:
+          error instanceof Error ? error.message : "Friend request could not be completed.",
+      });
+      return false;
+    }
+  }
+
+  clearFriendsError(): void {
+    if (this.snapshot.friendsError) this.update({ friendsError: "" });
+  }
+
   async loadMoreGameHistory(): Promise<void> {
     const userId = this.session?.user.id;
     const cursor = this.snapshot.history.at(-1);
@@ -859,69 +1428,6 @@ export class AccountSession {
     }
   }
 
-  async loadLeaderboardRanks(force = false): Promise<void> {
-    const userId = this.session?.user.id;
-    if (
-      !this.client ||
-      !userId ||
-      this.snapshot.status !== "signed-in" ||
-      !this.snapshot.leaderboardPublic
-    )
-      return;
-    if (this.leaderboardRanksInFlight && this.leaderboardRanksUserId === userId)
-      return this.leaderboardRanksInFlight;
-    if (
-      !force &&
-      this.leaderboardRanksUserId === userId &&
-      this.leaderboardRanksFetchedAt !== null &&
-      Date.now() - this.leaderboardRanksFetchedAt < LEADERBOARD_RANKS_CACHE_TTL_MS
-    )
-      return;
-    if (
-      !force &&
-      this.leaderboardRanksUserId === userId &&
-      this.snapshot.leaderboardRanksStatus === "error" &&
-      this.leaderboardRanksAttemptedAt !== null &&
-      Date.now() - this.leaderboardRanksAttemptedAt < LEADERBOARD_RANKS_CACHE_TTL_MS
-    )
-      return;
-
-    this.leaderboardRanksUserId = userId;
-    this.leaderboardRanksAttemptedAt = Date.now();
-    this.update({ leaderboardRanksStatus: "loading" });
-    const load = (async () => {
-      try {
-        const { data, error } = await this.client!.rpc("get_my_leaderboard_ranks");
-        if (error) throw error;
-        if (this.session?.user.id !== userId || !this.snapshot.leaderboardPublic) return;
-        const ranks = Array.isArray(data)
-          ? data.flatMap((item): AccountLeaderboardRank[] => {
-              if (!item || typeof item !== "object") return [];
-              const record = item as Record<string, unknown>;
-              if (
-                typeof record.game_id !== "string" ||
-                !Number.isSafeInteger(record.rank) ||
-                (record.rank as number) < 1
-              )
-                return [];
-              return [{ game_id: record.game_id, rank: record.rank as number }];
-            })
-          : [];
-        this.leaderboardRanksFetchedAt = Date.now();
-        this.update({ leaderboardRanks: ranks, leaderboardRanksStatus: "ready" });
-      } catch {
-        if (this.session?.user.id === userId && this.snapshot.leaderboardPublic)
-          this.update({ leaderboardRanksStatus: "error" });
-      }
-    })();
-    this.leaderboardRanksInFlight = load;
-    try {
-      await load;
-    } finally {
-      if (this.leaderboardRanksInFlight === load) this.leaderboardRanksInFlight = null;
-    }
-  }
-
   /** Defer a fresh account-history read until the user opens their account. */
   markGameHistoryStale(): void {
     if (this.session) this.historyInvalidationVersion += 1;
@@ -941,15 +1447,8 @@ export class AccountSession {
       if (error) throw error;
       this.update({
         leaderboardPublic: isPublic,
-        leaderboardRanks: isPublic ? this.snapshot.leaderboardRanks : [],
-        leaderboardRanksStatus: isPublic ? this.snapshot.leaderboardRanksStatus : "ready",
         busy: false,
       });
-      this.leaderboardRanksFetchedAt = isPublic ? this.leaderboardRanksFetchedAt : Date.now();
-      if (isPublic) {
-        this.leaderboardRanksFetchedAt = null;
-        void this.loadLeaderboardRanks(true);
-      }
       return true;
     } catch {
       if (this.session?.user.id === userId)
@@ -1089,15 +1588,15 @@ export class AccountSession {
     this.historyInvalidationVersion = 0;
     this.historyLoadedVersion = 0;
     this.historyAttemptedVersion = 0;
-    this.leaderboardRanksUserId = null;
-    this.leaderboardRanksFetchedAt = null;
-    this.leaderboardRanksAttemptedAt = null;
-    this.leaderboardRanksInFlight = null;
+    this.friendsRequest += 1;
+    this.friendsInFlight = null;
+    this.friendsUserId = null;
+    this.matchInvitesRequest += 1;
+    this.matchInvitesInFlight = null;
+    this.matchInvitesUserId = null;
     this.snapshot = {
       ...this.snapshot,
       leaderboardPublic: true,
-      leaderboardRanks: [],
-      leaderboardRanksStatus: "idle",
       joinedAt: null,
       history: [],
       historyCount: 0,
@@ -1112,6 +1611,20 @@ export class AccountSession {
       historyAttemptedAt: null,
       guestHistoryImporting: false,
       guestHistoryError: "",
+      friends: [],
+      incomingFriendRequests: [],
+      outgoingFriendRequests: [],
+      incomingFriendRequestCount: null,
+      incomingMatchInvites: [],
+      matchInvitesStatus: "idle",
+      matchInvitesError: "",
+      matchInvitesFetchedAt: null,
+      matchInvitesBusyId: null,
+      friendsStatus: "idle",
+      friendsRefreshing: false,
+      friendsError: "",
+      friendsActionBusy: false,
+      friendsFetchedAt: null,
     };
   }
 

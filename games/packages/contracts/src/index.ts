@@ -16,24 +16,87 @@ export type MatchReactionId = (typeof MATCH_REACTIONS)[number]["id"];
 export const MAX_QUICK_MESSAGE_CHARS = 100;
 export const QUICK_MESSAGE_HISTORY_LIMIT = 6;
 
-/** Stable, non-authenticated in-house identities. Keep the Supabase seed in sync. */
+export const IN_HOUSE_DIFFICULTIES = Object.freeze([
+  "easy",
+  "medium",
+  "hard",
+  "very-hard",
+] as const);
+export type InHouseDifficulty = (typeof IN_HOUSE_DIFFICULTIES)[number];
+
+/** Stable in-house identities mirror Supabase; difficulty is app-side strategy metadata. */
 export type InHousePlayerIdentity = Readonly<{
   playerId: string;
   username: string;
   displayName: string;
+  difficulty: InHouseDifficulty;
 }>;
 export const IN_HOUSE_PLAYERS: readonly InHousePlayerIdentity[] = Object.freeze([
-  Object.freeze({ playerId: "house_ayo", username: "house_ayo", displayName: "Ayo" }),
-  Object.freeze({ playerId: "house_tomi", username: "house_tomi18", displayName: "18 Tomi" }),
-  Object.freeze({ playerId: "house_zara", username: "house_zara", displayName: "Zara" }),
-  Object.freeze({ playerId: "house_kola", username: "house_kola42", displayName: "42 Kola" }),
-  Object.freeze({ playerId: "house_maya", username: "house_maya", displayName: "Maya" }),
-  Object.freeze({ playerId: "house_nia", username: "house_nia7", displayName: "7 Nia" }),
-  Object.freeze({ playerId: "house_deji", username: "house_deji", displayName: "Deji" }),
-  Object.freeze({ playerId: "house_tobi", username: "house_tobi63", displayName: "63 Tobi" }),
-  Object.freeze({ playerId: "house_chichi", username: "house_chichi", displayName: "Chichi" }),
-  Object.freeze({ playerId: "house_kemi", username: "house_kemi29", displayName: "29 Kemi" }),
+  Object.freeze({
+    playerId: "house_ayo",
+    username: "house_ayo",
+    displayName: "Ayo",
+    difficulty: "easy",
+  }),
+  Object.freeze({
+    playerId: "house_tomi",
+    username: "house_tomi18",
+    displayName: "18 Tomi",
+    difficulty: "easy",
+  }),
+  Object.freeze({
+    playerId: "house_zara",
+    username: "house_zara",
+    displayName: "Zara",
+    difficulty: "easy",
+  }),
+  Object.freeze({
+    playerId: "house_kola",
+    username: "house_kola42",
+    displayName: "42 Kola",
+    difficulty: "medium",
+  }),
+  Object.freeze({
+    playerId: "house_maya",
+    username: "house_maya",
+    displayName: "Maya",
+    difficulty: "medium",
+  }),
+  Object.freeze({
+    playerId: "house_nia",
+    username: "house_nia7",
+    displayName: "7 Nia",
+    difficulty: "medium",
+  }),
+  Object.freeze({
+    playerId: "house_deji",
+    username: "house_deji",
+    displayName: "Deji",
+    difficulty: "hard",
+  }),
+  Object.freeze({
+    playerId: "house_tobi",
+    username: "house_tobi63",
+    displayName: "63 Tobi",
+    difficulty: "hard",
+  }),
+  Object.freeze({
+    playerId: "house_chichi",
+    username: "house_chichi",
+    displayName: "Chichi",
+    difficulty: "very-hard",
+  }),
+  Object.freeze({
+    playerId: "house_kemi",
+    username: "house_kemi29",
+    displayName: "29 Kemi",
+    difficulty: "very-hard",
+  }),
 ]);
+
+export function inHouseDifficultyForPlayer(playerId: string): InHouseDifficulty | null {
+  return IN_HOUSE_PLAYERS.find((player) => player.playerId === playerId)?.difficulty ?? null;
+}
 
 /** Normalize untrusted, single-line in-match text for both client and service. */
 export function normalizeQuickMessage(value: unknown): string | null {

@@ -52,6 +52,24 @@ export class MatchApiClient {
     });
   }
 
+  async createPrivateMatchInvites(
+    matchId: string,
+    seatToken: string,
+    input: Readonly<{ inviteToken: string; friendshipIds: readonly string[] }>,
+  ): Promise<MatchApiResponse> {
+    const identityHeaders = await this.identityHeadersForMode("account");
+    return this.request(`/v1/matches/${encodeURIComponent(matchId)}/invites`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...identityHeaders,
+        "X-Match-Seat-Token": seatToken,
+      },
+      body: JSON.stringify(input),
+      signal: AbortSignal.timeout(8_000),
+    });
+  }
+
   async quickMatch(
     input: Readonly<{
       gameId: string;

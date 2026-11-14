@@ -1,9 +1,13 @@
 import type { PlayerSeat } from "@portfolio-games/contracts";
 import { applyAction, legalMoves } from "./index.js";
 import type { PlaceDiscAction, ReversiState } from "./index.js";
-import type { ReversiOpponentId } from "./opponents.js";
+import {
+  isReversiDifficulty,
+  type ReversiDifficulty,
+  type ReversiOpponentId,
+} from "./opponents.js";
 
-export const REVERSI_AI_ENGINE_VERSION = 1 as const;
+export const REVERSI_AI_ENGINE_VERSION = 2 as const;
 type Profile = Readonly<{
   corner: number;
   edge: number;
@@ -44,6 +48,40 @@ const PROFILES: Readonly<Record<ReversiOpponentId, Profile>> = Object.freeze({
     disc: 1.1,
     volatility: 2.1,
     lookAhead: false,
+  }),
+});
+const DIFFICULTY_PROFILES: Readonly<Record<ReversiDifficulty, Profile>> = Object.freeze({
+  easy: Object.freeze({
+    corner: 7,
+    edge: 1.6,
+    mobility: 1.4,
+    disc: 0.5,
+    volatility: 80,
+    lookAhead: false,
+  }),
+  medium: Object.freeze({
+    corner: 9,
+    edge: 2.3,
+    mobility: 3.2,
+    disc: 0.5,
+    volatility: 2.5,
+    lookAhead: false,
+  }),
+  hard: Object.freeze({
+    corner: 11,
+    edge: 2.8,
+    mobility: 4.5,
+    disc: 0.35,
+    volatility: 0.5,
+    lookAhead: true,
+  }),
+  "very-hard": Object.freeze({
+    corner: 12,
+    edge: 3,
+    mobility: 5,
+    disc: 0.3,
+    volatility: 0.05,
+    lookAhead: true,
   }),
 });
 const CORNERS = [
@@ -193,14 +231,12 @@ function evaluateMove(
  * avoid vulnerable corner-adjacent squares, and inspect one reply or forced-pass
  * bonus move for profiles that value planning. Tie variation is seeded per match.
  */
-export function chooseReversiMove(
+function chooseMoveWithProfile(
   state: ReversiState,
   seat: PlayerSeat,
-  profileId: ReversiOpponentId,
+  profile: Profile,
   seed: number,
 ): PlaceDiscAction {
-  const profile = PROFILES[profileId];
-  if (!profile) throw new RangeError("Unsupported Reversi opponent profile.");
   const actions = legalMoves(state, seat);
   if (!actions.length || state.nextPlayer !== seat)
     throw new RangeError("No legal Reversi move is available for this seat.");
@@ -214,4 +250,36 @@ export function chooseReversiMove(
     (a, b) => b.score - a.score || a.action.row - b.action.row || a.action.column - b.action.column,
   );
   return scored[0]!.action;
+}
+
+/** Resolve persisted strategy versions so already-running matches stay stable. */
+export function chooseReversiMoveForVersion(
+  state: ReversiState,
+  seat: PlayerSeat,
+  profileId: ReversiOpponentId | ReversiDifficulty,
+  seed: number,
+  engineVersion: number,
+): PlaceDiscAction {
+  if (engineVersion === 1) {
+    if (isReversiDifficulty(profileId))
+      throw new RangeError("Legacy Reversi engine requires a legacy opponent profile.");
+    const profile = PROFILES[profileId];
+    if (!profile) throw new RangeError("Unsupported Reversi opponent profile.");
+    return chooseMoveWithProfile(state, seat, profile, seed);
+  }
+  if (engineVersion === REVERSI_AI_ENGINE_VERSION) {
+    if (!isReversiDifficulty(profileId)) throw new RangeError("Unsupported Reversi difficulty.");
+    return chooseMoveWithProfile(state, seat, DIFFICULTY_PROFILES[profileId], seed);
+  }
+  throw new RangeError(`Unsupported Reversi AI engine version: ${engineVersion}`);
+}
+
+/** Legacy-profile convenience retained for existing package consumers. */
+export function chooseReversiMove(
+  state: ReversiState,
+  seat: PlayerSeat,
+  profileId: ReversiOpponentId,
+  seed: number,
+): PlaceDiscAction {
+  return chooseReversiMoveForVersion(state, seat, profileId, seed, 1);
 }

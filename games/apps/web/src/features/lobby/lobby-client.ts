@@ -54,6 +54,7 @@ const INITIAL_STATE: LobbyState = {
   loadingMore: false,
   filter: getInitialFilter(),
 };
+const LOBBY_SOCKET_TIMEOUT_MS = 10_000;
 
 function getInitialFilter(): string {
   const value = new URLSearchParams(window.location.search).get("lobbyGame");
@@ -92,11 +93,12 @@ function socketUrl(filter: string): URL {
   return url;
 }
 
-class LobbyClient {
+export class LobbyClient {
   private snapshot = INITIAL_STATE;
   private readonly houseRosterOrder = shuffled(IN_HOUSE_PLAYERS);
   private readonly listeners = new Set<() => void>();
   private socket: WebSocket | null = null;
+  private socketTimeoutTimer: number | null = null;
   private reconnectTimer: number | null = null;
   private stableConnectionTimer: number | null = null;
   private reconnectAttempt = 0;
@@ -157,6 +159,7 @@ class LobbyClient {
           gameId: nextFilter === "all" ? null : nextFilter,
         }),
       );
+      this.armSocketTimeout(this.socket);
     }
   }
 
@@ -265,7 +268,7 @@ class LobbyClient {
           offerId: `${now.toString(36)}-${Math.random().toString(36).slice(2, 9)}-${index}`,
           inHousePlayerId: identity.playerId,
           gameId: profile.gameId,
-          profileId: profile.id,
+          profileId: identity.difficulty,
           displayName,
           seriesTarget: ([1, 2, 3] as const)[Math.floor(Math.random() * 3)]!,
           expiresAt: now + randomBetween(180_000, 300_000),
@@ -345,19 +348,30 @@ class LobbyClient {
         offerTarget?: number;
       };
       const offers = Array.isArray(parsed.offers)
-        ? parsed.offers.filter(
-            (offer) =>
-              offer &&
-              typeof offer.offerId === "string" &&
-              typeof offer.gameId === "string" &&
-              typeof offer.profileId === "string" &&
-              typeof offer.inHousePlayerId === "string" &&
-              /^house_[a-z0-9_]{2,24}$/.test(offer.inHousePlayerId) &&
-              typeof offer.displayName === "string" &&
-              [1, 2, 3].includes(offer.seriesTarget) &&
-              Number.isFinite(offer.expiresAt) &&
-              offer.expiresAt > Date.now(),
-          )
+        ? parsed.offers.flatMap((offer) => {
+            if (
+              !offer ||
+              typeof offer.offerId !== "string" ||
+              typeof offer.gameId !== "string" ||
+              typeof offer.inHousePlayerId !== "string" ||
+              typeof offer.displayName !== "string" ||
+              ![1, 2, 3].includes(offer.seriesTarget) ||
+              !Number.isFinite(offer.expiresAt) ||
+              offer.expiresAt <= Date.now()
+            )
+              return [];
+            const identity = IN_HOUSE_PLAYERS.find(
+              (player) => player.playerId === offer.inHousePlayerId,
+            );
+            if (!identity || !GAME_CATALOG.some((game) => game.id === offer.gameId)) return [];
+            return [
+              {
+                ...offer,
+                profileId: identity.difficulty,
+                displayName: identity.displayName,
+              },
+            ];
+          })
         : [];
       this.snapshot = { ...this.snapshot, opponentOffers: offers };
       const savedInitialCount = parsed.initialOfferCount ?? parsed.offerTarget;
@@ -404,6 +418,7 @@ class LobbyClient {
     this.restoreOffers(this.snapshot.filter);
     const socket = new WebSocket(socketUrl(this.snapshot.filter));
     this.socket = socket;
+    this.armSocketTimeout(socket);
 
     socket.addEventListener("open", () => {
       if (this.socket !== socket) return;
@@ -417,6 +432,7 @@ class LobbyClient {
       this.stableConnectionTimer = window.setTimeout(() => {
         this.reconnectAttempt = 0;
       }, 15_000);
+      this.armSocketTimeout(socket);
       this.update({
         ...this.snapshot,
         connection: "connected",
@@ -437,7 +453,10 @@ class LobbyClient {
 
       if (message.type === "lobby-page" && this.awaitingSnapshot) return;
       if (message.type === "lobby-snapshot" || message.type === "lobby-page") {
-        if (message.type === "lobby-snapshot") this.awaitingSnapshot = false;
+        if (message.type === "lobby-snapshot") {
+          this.awaitingSnapshot = false;
+          this.clearSocketTimeout();
+        }
         const incoming = Array.isArray(message.matches) ? message.matches.filter(isLobbyMatch) : [];
         const matches =
           message.type === "lobby-snapshot"
@@ -512,6 +531,7 @@ class LobbyClient {
 
     socket.addEventListener("close", () => {
       if (this.socket !== socket) return;
+      this.clearSocketTimeout();
       this.socket = null;
       if (this.stableConnectionTimer !== null) window.clearTimeout(this.stableConnectionTimer);
       this.stableConnectionTimer = null;
@@ -541,7 +561,26 @@ class LobbyClient {
     });
   }
 
+  private armSocketTimeout(socket: WebSocket) {
+    this.clearSocketTimeout();
+    this.socketTimeoutTimer = window.setTimeout(() => {
+      this.socketTimeoutTimer = null;
+      if (this.socket !== socket) return;
+      this.update({
+        ...this.snapshot,
+        error: "Live matches are taking too long to load. Reconnecting…",
+      });
+      if (socket.readyState < WebSocket.CLOSING) socket.close(4000, "Lobby connection timed out");
+    }, LOBBY_SOCKET_TIMEOUT_MS);
+  }
+
+  private clearSocketTimeout() {
+    if (this.socketTimeoutTimer !== null) window.clearTimeout(this.socketTimeoutTimer);
+    this.socketTimeoutTimer = null;
+  }
+
   private closeSocket() {
+    this.clearSocketTimeout();
     if (this.reconnectTimer !== null) window.clearTimeout(this.reconnectTimer);
     this.reconnectTimer = null;
     if (this.stableConnectionTimer !== null) window.clearTimeout(this.stableConnectionTimer);

@@ -60,6 +60,19 @@ function createFakeClient({ firstHistory, importError = null }) {
     rpcCalled = resolve;
   });
   const client = {
+    channel() {
+      const channel = {
+        on() {
+          return channel;
+        },
+        subscribe(onStatus) {
+          queueMicrotask(() => onStatus("SUBSCRIBED"));
+          return channel;
+        },
+      };
+      return channel;
+    },
+    async removeChannel() {},
     auth: {
       onAuthStateChange(listener) {
         authListener = listener;
@@ -107,6 +120,7 @@ function createFakeClient({ firstHistory, importError = null }) {
       };
     },
     async rpc(name, args) {
+      if (name === "get_incoming_friend_request_count") return { data: 0, error: null };
       assert.equal(name, "import_guest_history");
       assert.deepEqual(args.entries, [guestEntry]);
       rpcCalled();

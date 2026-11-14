@@ -1,5 +1,6 @@
 import {
   IN_HOUSE_PLAYERS,
+  inHouseDifficultyForPlayer,
   invalid,
   isMatchReactionId,
   normalizeQuickMessage,
@@ -143,8 +144,7 @@ function sessionPolicy(match: Pick<Match, "gameId" | "rulesVersion">) {
 
 type InHousePlayer = Readonly<{ player_id: string; username: string; display_name: string }>;
 
-const LEADERBOARD_PUBLISH_ATTEMPTS = 3;
-const LEADERBOARD_RETRY_DELAYS_MS = [1_000, 5_000] as const;
+const LEADERBOARD_PUBLISH_RETRY_DELAYS_MS = [1_000, 5_000, 15_000] as const;
 
 class SupabaseRpcError extends Error {
   constructor(
@@ -204,17 +204,27 @@ async function supabaseRpc<T>(env: WorkerEnv, functionName: string, body: unknow
 }
 
 async function publishDailyLeaderboards(scheduledTime: number, env: WorkerEnv): Promise<void> {
-  for (let attempt = 1; attempt <= LEADERBOARD_PUBLISH_ATTEMPTS; attempt += 1) {
+  const maxAttempts = LEADERBOARD_PUBLISH_RETRY_DELAYS_MS.length + 1;
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     try {
-      await supabaseRpc(env, "publish_daily_leaderboards", {});
-      console.info("[leaderboard] Daily snapshot published.", { scheduledTime, attempt });
+      const publication = await supabaseRpc<{
+        cutoff_date?: string;
+        calculated_at?: string;
+      }>(env, "publish_daily_leaderboards", {});
+      console.info("[leaderboard] Daily snapshot published.", {
+        scheduledTime,
+        attempt,
+        cutoffDate: publication.cutoff_date ?? null,
+        calculatedAt: publication.calculated_at ?? null,
+      });
       return;
     } catch (error) {
       const retryable = isRetryableSupabaseFailure(error);
-      if (!retryable || attempt === LEADERBOARD_PUBLISH_ATTEMPTS) {
+      if (!retryable || attempt === maxAttempts) {
         console.error("[leaderboard] Daily snapshot publish failed.", {
           scheduledTime,
           attempt,
+          maxAttempts,
           retryable,
           error: error instanceof Error ? error.message : "unknown-error",
         });
@@ -225,9 +235,10 @@ async function publishDailyLeaderboards(scheduledTime: number, env: WorkerEnv): 
         scheduledTime,
         attempt,
         nextAttempt: attempt + 1,
+        maxAttempts,
         error: error instanceof Error ? error.message : "unknown-error",
       });
-      await wait(LEADERBOARD_RETRY_DELAYS_MS[attempt - 1] ?? 0);
+      await wait(LEADERBOARD_PUBLISH_RETRY_DELAYS_MS[attempt - 1] ?? 0);
     }
   }
 }
@@ -470,7 +481,7 @@ function cors(request: Request, env: WorkerEnv): HeadersInit {
     ? {
         "Access-Control-Allow-Origin": origin,
         "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
-        "Access-Control-Allow-Headers": "Content-Type,Authorization",
+        "Access-Control-Allow-Headers": "Content-Type,Authorization,X-Match-Seat-Token",
         Vary: "Origin",
       }
     : {};
@@ -788,11 +799,17 @@ function normalizeMatch(match: Match): Match {
     typeof normalized.aiSeed === "number" && Number.isSafeInteger(normalized.aiSeed)
       ? normalized.aiSeed
       : null;
-  normalized.aiEngineVersion = normalized.seats.some((seat) => seat?.kind === "ai")
+  const aiSeat = normalized.seats.find((seat) => seat?.kind === "ai");
+  const aiProvider = opponentProviderForGame(normalized.gameId);
+  normalized.aiEngineVersion = aiSeat
     ? typeof normalized.aiEngineVersion === "number" &&
       Number.isSafeInteger(normalized.aiEngineVersion)
       ? normalized.aiEngineVersion
-      : (opponentProviderForGame(normalized.gameId)?.currentEngineVersion ?? null)
+      : aiSeat.aiProfileId
+        ? (aiProvider?.profileEngineVersion(aiSeat.aiProfileId) ??
+          aiProvider?.currentEngineVersion ??
+          null)
+        : (aiProvider?.currentEngineVersion ?? null)
     : null;
   const hasAiSeat = normalized.seats.some((seat) => seat?.kind === "ai");
   normalized.aiRematchesAllowed =
@@ -898,7 +915,7 @@ export default {
       (url.pathname === "/v1/matches" ||
         url.pathname === "/v1/matches/quick" ||
         url.pathname === "/v1/matches/ai" ||
-        /^\/v1\/matches\/[A-Za-z0-9_-]{22}\/(?:join|preview)$/.test(url.pathname))
+        /^\/v1\/matches\/[A-Za-z0-9_-]{22}\/(?:join|preview|invites)$/.test(url.pathname))
     ) {
       const source = request.headers.get("cf-connecting-ip") ?? "local-development";
       const { success } = await env.ROOMS_RATE_LIMITER.limit({ key: `room-operations:${source}` });
@@ -1111,6 +1128,8 @@ export default {
           : "");
       if (!/^house_[a-z0-9_]{2,24}$/.test(requestedHousePlayerId))
         return json({ error: "opponent-unavailable" }, 400, headers);
+      const difficulty = inHouseDifficultyForPlayer(requestedHousePlayerId);
+      if (!difficulty) return json({ error: "opponent-unavailable" }, 400, headers);
       let housePlayer: InHousePlayer | null;
       try {
         housePlayer = await claimHousePlayer(env, requestedHousePlayerId, id);
@@ -1118,6 +1137,15 @@ export default {
         return json({ error: "opponent-unavailable" }, 503, headers);
       }
       if (!housePlayer) return json({ error: "opponent-unavailable" }, 409, headers);
+      const claimedDifficulty = inHouseDifficultyForPlayer(housePlayer.player_id);
+      if (!claimedDifficulty) {
+        try {
+          await releaseHousePlayer(env, id);
+        } catch {
+          /* Lease expires automatically if cleanup is unavailable. */
+        }
+        return json({ error: "opponent-unavailable" }, 503, headers);
+      }
       const aiName =
         displayNameKey(housePlayer.display_name) === displayNameKey(humanName)
           ? uniqueGeneratedDisplayName(id, 1, [humanName])
@@ -1139,7 +1167,7 @@ export default {
           {
             tokenHash: null,
             kind: "ai",
-            aiProfileId: values.profileId,
+            aiProfileId: claimedDifficulty,
             inHousePlayerId: housePlayer.player_id,
             displayName: aiName,
             connected: true,
@@ -1217,7 +1245,7 @@ export default {
     }
 
     const route = url.pathname.match(
-      /^\/v1\/matches\/([A-Za-z0-9_-]{22})(?:\/(join|preview|socket|resign|cancel|leave|leave-series))?$/,
+      /^\/v1\/matches\/([A-Za-z0-9_-]{22})(?:\/(join|preview|invites|socket|resign|cancel|leave|leave-series))?$/,
     );
     if (!route || !ID_PATTERN.test(route[1] ?? ""))
       return json({ error: "not-found" }, 404, headers);
@@ -1287,6 +1315,68 @@ export default {
       );
       const payload = (await result.json()) as Record<string, unknown>;
       return json(result.ok ? { ...payload, seatToken } : payload, result.status, headers);
+    }
+    if (operation === "invites" && request.method === "POST") {
+      const input = await body(request);
+      if (!input || typeof input !== "object" || Array.isArray(input))
+        return json({ error: "invalid-request" }, 400, headers);
+      const values = input as Record<string, unknown>;
+      const seatToken = request.headers.get("x-match-seat-token");
+      const inviteToken = values.inviteToken;
+      const friendshipIds = values.friendshipIds;
+      if (
+        !seatToken ||
+        seatToken.length > 128 ||
+        typeof inviteToken !== "string" ||
+        !/^[A-Za-z0-9_-]{43}$/.test(inviteToken) ||
+        !Array.isArray(friendshipIds) ||
+        friendshipIds.length < 1 ||
+        friendshipIds.length > 10 ||
+        friendshipIds.some(
+          (value) => typeof value !== "string" || !/^[0-9a-f-]{36}$/i.test(value),
+        ) ||
+        new Set(friendshipIds).size !== friendshipIds.length
+      )
+        return json({ error: "invalid-invite-request" }, 400, headers);
+
+      const account = await resolveAccountIdentity(request, env);
+      if (!account.ok) return json(await account.response.json(), account.response.status, headers);
+      if (!account.identity) return json({ error: "account-session-required" }, 401, headers);
+      const room = await stub.fetch(
+        new Request("https://match.internal/authorize-invites", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${seatToken}` },
+          body: JSON.stringify({
+            inviteHash: await hash(inviteToken),
+            accountId: account.identity.userId,
+          }),
+        }),
+      );
+      if (!room.ok) return json(await room.json(), room.status, headers);
+      const roomDetails = (await room.json()) as { gameId?: unknown; seriesTarget?: unknown };
+      if (
+        typeof roomDetails.gameId !== "string" ||
+        !SUPPORTED_GAME_IDS.includes(roomDetails.gameId) ||
+        (roomDetails.seriesTarget !== 1 &&
+          roomDetails.seriesTarget !== 2 &&
+          roomDetails.seriesTarget !== 3)
+      )
+        return json({ error: "room-unavailable" }, 409, headers);
+      try {
+        const invitedCount = await supabaseRpc<number>(env, "create_private_match_invites", {
+          p_match_id: id,
+          p_game_id: roomDetails.gameId,
+          p_series_target: roomDetails.seriesTarget,
+          p_invite_token: inviteToken,
+          p_friendship_ids: friendshipIds,
+          p_sender_id: account.identity.userId,
+        });
+        if (invitedCount !== friendshipIds.length)
+          return json({ error: "friend-invites-unconfirmed" }, 503, headers);
+        return json({ invitedCount }, 201, headers);
+      } catch {
+        return json({ error: "friend-invites-unavailable" }, 503, headers);
+      }
     }
     if (operation === "socket" && request.method === "GET") {
       if (request.headers.get("upgrade")?.toLowerCase() !== "websocket")
@@ -1572,6 +1662,8 @@ export class MatchDurableObject {
       return this.serializeMutation(() => this.join(request));
     if (operation === "preview" && request.method === "POST")
       return this.serializeMutation(() => this.preview(request));
+    if (operation === "authorize-invites" && request.method === "POST")
+      return this.authorizePrivateInvites(request);
     if (operation === "cancel" && request.method === "POST")
       return this.serializeMutation(() => this.cancelWaitingRoom(request));
     if (operation === "leave" && request.method === "POST")
@@ -1595,6 +1687,31 @@ export class MatchDurableObject {
     if (operation === "resign" && request.method === "POST")
       return this.serializeMutation(() => this.resign(request));
     return json({ error: "not-found" }, 404);
+  }
+
+  private async authorizePrivateInvites(request: Request): Promise<Response> {
+    const match = await this.load();
+    const credential = request.headers.get("authorization")?.replace(/^Bearer\s+/i, "");
+    if (!match || !credential) return json({ error: "room-unavailable" }, 404);
+    const input = await body(request);
+    if (!input || typeof input !== "object" || Array.isArray(input))
+      return json({ error: "invalid-request" }, 400);
+    const values = input as Record<string, unknown>;
+    const host = match.seats[0];
+    if (
+      match.visibility !== "invite" ||
+      match.status !== "waiting" ||
+      match.seats[1] ||
+      match.expiresAt <= Date.now() ||
+      !host?.tokenHash ||
+      host.tokenHash !== (await hash(credential)) ||
+      typeof values.accountId !== "string" ||
+      host.accountId !== values.accountId ||
+      typeof values.inviteHash !== "string" ||
+      values.inviteHash !== (await this.ctx.storage.get<string>("invite-hash"))
+    )
+      return json({ error: "room-unavailable" }, 409);
+    return json({ gameId: match.gameId, seriesTarget: match.seriesTarget });
   }
 
   private async join(request: Request): Promise<Response> {
@@ -2360,8 +2477,6 @@ export class MatchDurableObject {
       const game = gameForMatch(match);
       if (provider && game) {
         const seed = crypto.getRandomValues(new Uint32Array(1))[0] ?? 1;
-        const profileId =
-          provider.profileIds[seed % provider.profileIds.length] ?? provider.defaultProfileId;
         let housePlayer: InHousePlayer | null = null;
         try {
           housePlayer = await claimAnyHousePlayer(this.env, match.id);
@@ -2369,6 +2484,15 @@ export class MatchDurableObject {
           /* No server-side roster claim means we keep the room human-joinable. */
         }
         if (!housePlayer) {
+          match.aiFallbackAt = null;
+          match.revision += 1;
+          await this.save(match);
+          await this.schedule(match);
+          this.broadcast({ type: "match", match: snapshot(match) });
+          return;
+        }
+        const profileId = inHouseDifficultyForPlayer(housePlayer.player_id);
+        if (!profileId) {
           match.aiFallbackAt = null;
           match.revision += 1;
           await this.save(match);
@@ -2622,7 +2746,12 @@ export class MatchDurableObject {
     const aiSeat: PlayerSeat | null = aiIndex === 0 ? "first" : aiIndex === 1 ? "second" : null;
     if (!aiSeat || !ai?.aiProfileId) return;
     const opponent = opponentProviderForVersion(match.gameId, match.aiEngineVersion!);
-    if (!opponent || !opponent.supportsProfile(ai.aiProfileId)) return;
+    if (
+      !opponent ||
+      !opponent.supportsProfile(ai.aiProfileId) ||
+      opponent.profileEngineVersion(ai.aiProfileId) !== match.aiEngineVersion
+    )
+      return;
     const game = gameForMatch(match);
     if (!game || !game.inspectState(match.state, match.rulesVersion).ok) return;
     let inspected = game.inspectState(match.state, match.rulesVersion);

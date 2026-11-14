@@ -19,12 +19,31 @@ function fakeClient({
   history = [],
   historyCount = history.length,
   historyError = null,
+  incomingFriendRequestCount = 0,
 } = {}) {
   let authListener;
   let historyRequests = 0;
+  let currentIncomingCount = incomingFriendRequestCount;
+  const friendshipListeners = [];
   const rpcRequests = [];
   return {
     client: {
+      channel() {
+        const handlers = [];
+        const channel = {
+          on(_type, _filter, handler) {
+            handlers.push(handler);
+            return channel;
+          },
+          subscribe(onStatus) {
+            queueMicrotask(() => onStatus("SUBSCRIBED"));
+            friendshipListeners.push(...handlers);
+            return channel;
+          },
+        };
+        return channel;
+      },
+      async removeChannel() {},
       auth: {
         onAuthStateChange(listener) {
           authListener = listener;
@@ -71,6 +90,8 @@ function fakeClient({
       },
       async rpc(name, args) {
         rpcRequests.push({ name, args });
+        if (name === "get_incoming_friend_request_count")
+          return { data: currentIncomingCount, error: null };
         if (name === "claim_username") return { data: claim, error: null };
         assert.equal(name, "change_username");
         return { data: rename, error: renameError };
@@ -78,6 +99,10 @@ function fakeClient({
     },
     emit(event, session) {
       authListener?.(event, session);
+    },
+    emitFriendshipChange(count) {
+      currentIncomingCount = count;
+      for (const listener of friendshipListeners) listener({ event: "INSERT" });
     },
     get historyRequests() {
       return historyRequests;
@@ -178,6 +203,20 @@ test("signed-out users resolve to guest identity without waiting", async () => {
   account.stop();
 });
 
+test("loads the pending request count after subscribing and refreshes on friendship changes", async () => {
+  const fake = fakeClient({ incomingFriendRequestCount: 2 });
+  const account = new AccountSession(fake.client);
+  account.start();
+  fake.emit("INITIAL_SESSION", signedInSession);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(account.getSnapshot().incomingFriendRequestCount, 2);
+
+  fake.emitFriendshipChange(3);
+  await new Promise((resolve) => setTimeout(resolve, 250));
+  assert.equal(account.getSnapshot().incomingFriendRequestCount, 3);
+  account.stop();
+});
+
 test("username claim updates the account identity", async () => {
   const fake = fakeClient({ claim: "NewName_1" });
   const account = new AccountSession(fake.client);
@@ -227,7 +266,10 @@ test("username change cooldown is enforced locally before an RPC is sent", async
 
   assert.equal(await account.changeUsername("NewName_1"), false);
   assert.match(account.getSnapshot().usernameChangeError, /change your username again on/);
-  assert.equal(fake.rpcRequests.length, 0);
+  assert.equal(
+    fake.rpcRequests.some(({ name }) => name === "change_username"),
+    false,
+  );
   account.stop();
 });
 

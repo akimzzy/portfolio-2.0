@@ -6,7 +6,10 @@ import {
   chooseConnectFourMoveForVersion,
   supportsConnectFourAiEngineVersion,
 } from "@portfolio-games/connect-four/ai";
-import { CONNECT_FOUR_OPPONENTS } from "@portfolio-games/connect-four/opponents";
+import {
+  CONNECT_FOUR_DIFFICULTIES,
+  CONNECT_FOUR_OPPONENTS,
+} from "@portfolio-games/connect-four/opponents";
 
 function play(columns, startingPlayer = "first") {
   let state = createGame(startingPlayer);
@@ -86,16 +89,36 @@ test("persisted AI engine versions resolve explicitly and reject unknown version
   const state = createGame("first");
   assert.equal(supportsConnectFourAiEngineVersion(1), true);
   assert.equal(supportsConnectFourAiEngineVersion(2), true);
-  assert.equal(supportsConnectFourAiEngineVersion(3), false);
+  assert.equal(supportsConnectFourAiEngineVersion(3), true);
   assert.ok(chooseConnectFourMoveForVersion(state, "first", "standard", 1, 1) >= 0);
   assert.equal(
     chooseConnectFourMoveForVersion(state, "first", "standard", 1, 2),
     chooseConnectFourMove(state, "first", "standard", 1),
   );
   assert.throws(
-    () => chooseConnectFourMoveForVersion(state, "first", "standard", 1, 3),
+    () => chooseConnectFourMoveForVersion(state, "first", "standard", 1, 4),
     /Unsupported Connect Four AI engine version/,
   );
+});
+
+test("each skill tier returns legal moves and wins or blocks immediate threats", () => {
+  const opening = createGame("first");
+  const winState = play([0, 6, 1, 6, 2, 5]);
+  const blockState = play([0, 6, 1, 6, 2]);
+  for (const difficulty of CONNECT_FOUR_DIFFICULTIES) {
+    const openingMove = chooseConnectFourMoveForVersion(opening, "first", difficulty.id, 12345, 3);
+    assert.ok(openingMove >= 0 && openingMove < 7);
+    assert.equal(
+      chooseConnectFourMoveForVersion(winState, "first", difficulty.id, 9, 3),
+      3,
+      `${difficulty.id} should take an immediate win`,
+    );
+    assert.equal(
+      chooseConnectFourMoveForVersion(blockState, "second", difficulty.id, 19, 3),
+      3,
+      `${difficulty.id} should block a single immediate threat`,
+    );
+  }
 });
 
 test("all profiles take a direct win before strategic preference", () => {

@@ -44,6 +44,7 @@ type OnlineForm = {
   matchAnySeries: boolean;
   visibility: "public" | "invite";
   optionsExpanded: boolean;
+  invitedFriendshipIds: string[];
 };
 type Multiplayer = OnlineMultiplayer;
 type CreateRoomInput = Readonly<{
@@ -52,6 +53,7 @@ type CreateRoomInput = Readonly<{
   matchAnySeries: boolean;
   displayName: string;
   useAccountIdentity: boolean;
+  invitedFriendshipIds: string[];
 }>;
 type GameDialogOptions = Pick<GameDialogView, "mode" | "title" | "primaryLabel"> &
   Partial<Omit<GameDialogView, "mode" | "title" | "primaryLabel">>;
@@ -179,6 +181,7 @@ export function createGameController() {
     matchAnySeries: false,
     visibility: "public",
     optionsExpanded: false,
+    invitedFriendshipIds: [],
   };
   let opponentIntent: {
     gameId: string;
@@ -1493,6 +1496,7 @@ export function createGameController() {
     matchAnySeries,
     displayName,
     useAccountIdentity,
+    invitedFriendshipIds,
   }: CreateRoomInput) {
     updateOnlineDialog({ busy: true, error: "Creating your game…" });
     try {
@@ -1538,12 +1542,46 @@ export function createGameController() {
         link.hash = result.inviteToken ? `invite=${encodeURIComponent(result.inviteToken)}` : "";
         currentInviteLink = link.href;
         matchSessionStorage.saveInviteLink(result.matchId, link.href);
+        const inviteFriends =
+          useAccountIdentity && invitedFriendshipIds.length > 0 && result.inviteToken !== null;
         presentOnlineDialog({
           mode: "invite",
           title: "Invite a friend",
+          description: inviteFriends
+            ? "Sending invites…"
+            : "Share this private link with a friend.",
           inviteLink: link.href,
           closeLabel: "Done",
         });
+        if (inviteFriends && result.inviteToken) {
+          void matchApi
+            .createPrivateMatchInvites(result.matchId, result.seatToken, {
+              inviteToken: result.inviteToken,
+              friendshipIds: invitedFriendshipIds,
+            })
+            .then((response) => {
+              const invitedCount = response.body.invitedCount;
+              if (!response.ok || !Number.isSafeInteger(invitedCount))
+                throw new Error(
+                  response.body.error === "room-unavailable"
+                    ? "This match is no longer waiting for friends. You can still share its link."
+                    : "Friend invites could not be sent. You can still share the private link.",
+                );
+              if (onlineDialogView?.mode === "invite" && onlineDialogView.inviteLink === link.href)
+                updateOnlineDialog({
+                  description: `Invite sent to ${invitedCount} ${invitedCount === 1 ? "friend" : "friends"}.`,
+                });
+            })
+            .catch((inviteError: unknown) => {
+              if (onlineDialogView?.mode === "invite" && onlineDialogView.inviteLink === link.href)
+                updateOnlineDialog({
+                  description:
+                    inviteError instanceof Error
+                      ? inviteError.message
+                      : "Friend invites could not be sent. You can still share the private link.",
+                });
+            });
+        }
       } else onlineDialog.close();
       const cleanUrl = new URL(window.location.href);
       cleanUrl.search = `?match=${encodeURIComponent(result.matchId)}`;
@@ -1976,6 +2014,7 @@ export function createGameController() {
       matchAnySeries: false,
       visibility: "public",
       optionsExpanded: false,
+      invitedFriendshipIds: [],
       joinAsGuest: accountSession.getIdentity() === null,
     };
     clearPlayerNameError();
@@ -1989,19 +2028,30 @@ export function createGameController() {
 
   function updateOnlineForm(
     field:
-      "name" | "joinAsGuest" | "seriesTarget" | "matchAnySeries" | "visibility" | "optionsExpanded",
-    value: string | number | boolean,
+      | "name"
+      | "joinAsGuest"
+      | "seriesTarget"
+      | "matchAnySeries"
+      | "visibility"
+      | "optionsExpanded"
+      | "invitedFriendshipIds",
+    value: string | number | boolean | string[],
   ) {
     if (field === "name" && typeof value === "string") onlineForm.name = value.slice(0, 24);
-    else if (field === "joinAsGuest" && typeof value === "boolean") onlineForm.joinAsGuest = value;
-    else if (field === "seriesTarget" && (value === 1 || value === 2 || value === 3))
+    else if (field === "joinAsGuest" && typeof value === "boolean") {
+      onlineForm.joinAsGuest = value;
+      if (!value && onlineForm.visibility === "invite") void accountSession.loadFriends();
+    } else if (field === "seriesTarget" && (value === 1 || value === 2 || value === 3))
       onlineForm.seriesTarget = value;
     else if (field === "matchAnySeries" && typeof value === "boolean")
       onlineForm.matchAnySeries = value;
-    else if (field === "visibility" && (value === "public" || value === "invite"))
+    else if (field === "visibility" && (value === "public" || value === "invite")) {
       onlineForm.visibility = value;
-    else if (field === "optionsExpanded" && typeof value === "boolean")
+      if (value === "invite" && !onlineForm.joinAsGuest) void accountSession.loadFriends();
+    } else if (field === "optionsExpanded" && typeof value === "boolean")
       onlineForm.optionsExpanded = value;
+    else if (field === "invitedFriendshipIds" && Array.isArray(value))
+      onlineForm.invitedFriendshipIds = [...new Set(value)].slice(0, 10);
     else return;
     if (onlineDialogView) updateOnlineDialog({ ...onlineForm, nameInvalid: false, error: "" });
   }
@@ -2131,7 +2181,13 @@ export function createGameController() {
     opponentIntent = { gameId, profileId, inHousePlayerId, opponentName, seriesTarget };
     returnToGamesAfterCreateDialog = appStore.getSnapshot().screen === "lobby";
     currentGameId = gameId;
-    onlineForm = { ...onlineForm, seriesTarget, visibility: "public", optionsExpanded: false };
+    onlineForm = {
+      ...onlineForm,
+      seriesTarget,
+      visibility: "public",
+      optionsExpanded: false,
+      invitedFriendshipIds: [],
+    };
     onlineForm.joinAsGuest = accountSession.getIdentity() === null;
     clearPlayerNameError();
     showGameView();
@@ -2259,6 +2315,7 @@ export function createGameController() {
         matchAnySeries: onlineForm.matchAnySeries,
         displayName,
         useAccountIdentity,
+        invitedFriendshipIds: useAccountIdentity ? onlineForm.invitedFriendshipIds : [],
       });
     } catch (error: unknown) {
       updateOnlineDialog({
@@ -2423,6 +2480,7 @@ export function createGameController() {
       matchAnySeries: onlineForm.matchAnySeries,
       visibility: onlineForm.visibility,
       optionsExpanded: onlineForm.optionsExpanded,
+      invitedFriendshipIds: [...onlineForm.invitedFriendshipIds],
       inviteLink: "",
       copyLabel: "Copy link",
       busy: false,
@@ -2684,6 +2742,7 @@ export function createGameController() {
       matchAnySeries: onlineForm.matchAnySeries,
       displayName: multiplayer.displayName ?? expiredMatch.playerNames?.[0] ?? "",
       useAccountIdentity: multiplayer.accountLinked,
+      invitedFriendshipIds: [],
     };
     currentGameId = expiredMatch.gameId;
     gameDialog.close("recreate-room");

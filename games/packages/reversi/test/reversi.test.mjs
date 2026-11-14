@@ -7,8 +7,12 @@ import {
   parseReversiState,
   reversiRuntime,
 } from "../dist/index.js";
-import { chooseReversiMove } from "../dist/ai.js";
-import { REVERSI_OPPONENTS } from "../dist/opponents.js";
+import {
+  chooseReversiMove,
+  chooseReversiMoveForVersion,
+  REVERSI_AI_ENGINE_VERSION,
+} from "../dist/ai.js";
+import { REVERSI_DIFFICULTIES, REVERSI_OPPONENTS } from "../dist/opponents.js";
 
 test("starts with the standard four discs and four legal moves for dark", () => {
   const state = createGame("first");
@@ -171,4 +175,34 @@ test("all opponent profiles select a legal action and the runtime adapter expose
   assert.equal(inspected.ok, true);
   assert.equal(inspected.value.lastActionPlayer, "second");
   assert.equal(reversiRuntime.getSessionPolicy(1).turnDurationMs, 45_000);
+});
+
+test("versioned skill tiers choose legal Reversi moves while legacy profiles remain supported", () => {
+  const state = createGame("first");
+  assert.equal(REVERSI_AI_ENGINE_VERSION, 2);
+  for (const difficulty of REVERSI_DIFFICULTIES) {
+    const action = chooseReversiMoveForVersion(
+      state,
+      "first",
+      difficulty.id,
+      12345,
+      REVERSI_AI_ENGINE_VERSION,
+    );
+    assert.ok(
+      legalMoves(state, "first").some(
+        (move) => move.row === action.row && move.column === action.column,
+      ),
+      `${difficulty.id} chose an illegal opening`,
+    );
+  }
+  assert.ok(
+    legalMoves(state, "first").some((move) => {
+      const legacy = chooseReversiMoveForVersion(state, "first", "expert", 12345, 1);
+      return move.row === legacy.row && move.column === legacy.column;
+    }),
+  );
+  assert.throws(
+    () => chooseReversiMoveForVersion(state, "first", "easy", 12345, 1),
+    /Legacy Reversi engine/,
+  );
 });

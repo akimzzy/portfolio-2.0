@@ -43,8 +43,14 @@ export type GameController = Readonly<{
   retryOnlineDialog(): Promise<void>;
   updateOnlineForm(
     field:
-      "name" | "joinAsGuest" | "seriesTarget" | "matchAnySeries" | "visibility" | "optionsExpanded",
-    value: string | number | boolean,
+      | "name"
+      | "joinAsGuest"
+      | "seriesTarget"
+      | "matchAnySeries"
+      | "visibility"
+      | "optionsExpanded"
+      | "invitedFriendshipIds",
+    value: string | number | boolean | string[],
   ): void;
   copyInviteLink(): Promise<void>;
   closeOnlineDialog(): void;

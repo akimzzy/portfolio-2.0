@@ -6,6 +6,7 @@ type CountdownProps = Readonly<{
   clockOffset: number;
   context: string;
   urgent?: boolean;
+  showMinutes?: boolean;
   onExpire?: () => void;
 }>;
 
@@ -15,10 +16,36 @@ export function Countdown({
   clockOffset,
   context,
   urgent = false,
+  showMinutes = false,
   onExpire,
 }: CountdownProps) {
   const now = useSyncExternalStore(subscribeClock, getClockSnapshot, getClockSnapshot);
   const seconds = Math.max(0, Math.ceil((deadline - (now + clockOffset)) / 1_000));
+  const days = Math.floor(seconds / 86_400);
+  const hours = Math.floor(seconds / 3_600) % 24;
+  const minutes = Math.floor(seconds / 60);
+  const clockMinutes = Math.floor(seconds / 60) % 60;
+  const remainingSeconds = seconds % 60;
+  const pad = (value: number) => String(value).padStart(2, "0");
+  const displayTime =
+    !showMinutes || seconds < 60
+      ? `${seconds}s`
+      : days > 0
+        ? `${days}d ${pad(hours)}:${pad(clockMinutes)}:${pad(remainingSeconds)}`
+        : hours > 0
+          ? `${hours}:${pad(clockMinutes)}:${pad(remainingSeconds)}`
+          : `${minutes}:${pad(remainingSeconds)}`;
+  const accessibleTime =
+    !showMinutes || seconds < 60
+      ? `${seconds} second${seconds === 1 ? "" : "s"}`
+      : [
+          days > 0 && `${days} day${days === 1 ? "" : "s"}`,
+          (days > 0 || hours > 0) && `${hours} hour${hours === 1 ? "" : "s"}`,
+          `${clockMinutes} minute${clockMinutes === 1 ? "" : "s"}`,
+          `${remainingSeconds} second${remainingSeconds === 1 ? "" : "s"}`,
+        ]
+          .filter(Boolean)
+          .join(", ");
   const expiryHandled = useRef(false);
 
   useEffect(() => {
@@ -34,9 +61,9 @@ export function Countdown({
       className={`countdown-indicator${urgent && seconds <= 10 ? " is-urgent" : ""}`}
       role="timer"
       aria-live="off"
-      aria-label={`${seconds} seconds ${context}`}
+      aria-label={`${accessibleTime} ${context}`}
     >
-      {seconds}s
+      {displayTime}
     </span>
   );
 }

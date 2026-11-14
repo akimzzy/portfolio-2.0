@@ -283,6 +283,44 @@ test("competing joins can claim only one seat", { timeout: 30_000 }, async (t) =
   assert.deepEqual(joins.map((result) => result.response.status).sort(), [200, 409]);
 });
 
+test("private friend invites require a signed-in account", { timeout: 30_000 }, async (t) => {
+  const port = await unusedPort();
+  const persistencePath = await mkdtemp(path.join(os.tmpdir(), "portfolio-games-invites-auth-"));
+  let worker;
+  t.after(async () => {
+    if (worker) await stopWorker(worker.process);
+    await rm(persistencePath, { recursive: true, force: true });
+  });
+
+  worker = await startWorker(port, persistencePath);
+  const created = await api(worker.baseUrl, "/v1/matches", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      gameId: "connect-four",
+      rulesVersion: RULES_VERSION,
+      visibility: "invite",
+      seriesTarget: 1,
+      displayName: "Host",
+    }),
+  });
+  assert.equal(created.response.status, 201);
+
+  const invite = await api(worker.baseUrl, `/v1/matches/${created.body.matchId}/invites`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Match-Seat-Token": created.body.seatToken,
+    },
+    body: JSON.stringify({
+      inviteToken: created.body.inviteToken,
+      friendshipIds: ["f".repeat(36)],
+    }),
+  });
+  assert.equal(invite.response.status, 401);
+  assert.equal(invite.body.error, "account-session-required");
+});
+
 test(
   "a room cannot be cancelled after a concurrent join has claimed its seat",
   { timeout: 30_000 },

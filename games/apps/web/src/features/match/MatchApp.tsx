@@ -408,6 +408,7 @@ export default function MatchApp({
                     deadline={connection.roomExpiry.deadline}
                     clockOffset={connection.roomExpiry.clockOffset}
                     context={connection.roomExpiry.context}
+                    showMinutes
                     onExpire={controller.refreshMatchStatus}
                   />{" "}
                 </span>
@@ -1284,11 +1285,73 @@ export default function MatchApp({
                       </label>
                     ))}
                   </fieldset>
-                  <p className="match-setup-summary">
-                    {match.onlineDialog.seriesTarget === 1
-                      ? "One game"
-                      : `First to win ${match.onlineDialog.seriesTarget}`}
-                  </p>
+                  {match.onlineDialog.visibility === "invite" &&
+                    account.status === "signed-in" &&
+                    !match.onlineDialog.joinAsGuest && (
+                      <fieldset className="invite-friends-options">
+                        <legend>Invite friends</legend>
+                        {account.friendsStatus === "loading" || account.friendsStatus === "idle" ? (
+                          <p className="invite-friends-note" role="status">
+                            Loading friends…
+                          </p>
+                        ) : account.friendsStatus === "error" ? (
+                          <button
+                            className="invite-friends-note is-action"
+                            type="button"
+                            onClick={() => void accountSession.loadFriends(true)}
+                          >
+                            Try again
+                          </button>
+                        ) : account.friends.length === 0 ? (
+                          <p className="invite-friends-note">Add friends from your account.</p>
+                        ) : (
+                          <div className="invite-friends-list">
+                            {account.friends.map((friend) => {
+                              const checked = match.onlineDialog?.invitedFriendshipIds.includes(
+                                friend.id,
+                              );
+                              const atLimit =
+                                match.onlineDialog!.invitedFriendshipIds.length >= 10 && !checked;
+                              return (
+                                <label className="invite-friend-option" key={friend.id}>
+                                  <input
+                                    type="checkbox"
+                                    checked={checked}
+                                    disabled={atLimit}
+                                    onChange={(event) => {
+                                      const selected = new Set(
+                                        match.onlineDialog?.invitedFriendshipIds ?? [],
+                                      );
+                                      if (event.currentTarget.checked) selected.add(friend.id);
+                                      else selected.delete(friend.id);
+                                      controller.updateOnlineForm("invitedFriendshipIds", [
+                                        ...selected,
+                                      ]);
+                                    }}
+                                  />
+                                  <span>@{friend.username}</span>
+                                </label>
+                              );
+                            })}
+                          </div>
+                        )}
+                        {account.friends.length > 0 && (
+                          <p className="invite-friends-note">First friend to join gets the seat.</p>
+                        )}
+                      </fieldset>
+                    )}
+                  {match.onlineDialog.visibility === "invite" &&
+                    account.status === "signed-in" &&
+                    match.onlineDialog.joinAsGuest && (
+                      <p className="invite-friends-note">Friend invites need an account.</p>
+                    )}
+                  {!optionsExpanded && (
+                    <p className="match-setup-summary">
+                      {match.onlineDialog.seriesTarget === 1
+                        ? "One game"
+                        : `First to win ${match.onlineDialog.seriesTarget}`}
+                    </p>
+                  )}
                   <button
                     className="match-options-toggle"
                     type="button"
@@ -1315,7 +1378,6 @@ export default function MatchApp({
                                 {target === 1 ? "One game" : `First to win ${target} games`}
                               </strong>
                             </span>
-                            <span className="series-option-check" aria-hidden="true" />
                           </label>
                         ))}
                         <p className="series-options-note">Ties add no wins.</p>
@@ -1341,7 +1403,6 @@ export default function MatchApp({
                               <span className="series-option-copy">
                                 <strong>{option.label}</strong>
                               </span>
-                              <span className="series-option-check" aria-hidden="true" />
                             </label>
                           ))}
                           {match.onlineDialog.matchAnySeries && (
