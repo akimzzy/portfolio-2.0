@@ -55,7 +55,11 @@ export class MatchApiClient {
   async createPrivateMatchInvites(
     matchId: string,
     seatToken: string,
-    input: Readonly<{ inviteToken: string; friendshipIds: readonly string[] }>,
+    input: Readonly<{
+      inviteToken: string;
+      friendshipIds: readonly string[];
+      inHouseFriendshipIds: readonly string[];
+    }>,
   ): Promise<MatchApiResponse> {
     const identityHeaders = await this.identityHeadersForMode("account");
     return this.request(`/v1/matches/${encodeURIComponent(matchId)}/invites`, {

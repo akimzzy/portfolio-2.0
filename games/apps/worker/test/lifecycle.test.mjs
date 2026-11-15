@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import test from "node:test";
 import { MatchDurableObject } from "../dist/index.js";
 import { createGame } from "@portfolio-games/connect-four";
+import { IN_HOUSE_PLAYERS } from "@portfolio-games/contracts";
 
 const now = 1_800_000_000_000;
 
@@ -984,4 +985,103 @@ test("terminal match data is removed after its retention deadline", async () => 
 
   assert.equal(values.has("match"), false);
   assert.equal(await storage.getAlarm(), null);
+});
+
+test("private house-friend fallback is delayed, specific, and joins through the normal room state", async () => {
+  const hostAccountId = "7f25c8d9-07b8-4e2c-9fc1-288019d41f4b";
+  const inviteHash = "verified-invite-hash";
+  const player = IN_HOUSE_PLAYERS[0];
+  const otherPlayer = IN_HOUSE_PLAYERS[1];
+  const match = {
+    ...makeWaitingMatch("first-seat-token", now + 24 * 60 * 60_000),
+    visibility: "invite",
+    expiresAt: now + 24 * 60 * 60_000,
+  };
+  match.seats[0].accountId = hostAccountId;
+  const harness = makeObject(match, [], { APP_ENV: "development" });
+  await harness.storage.put("invite-hash", inviteHash);
+
+  const scheduleRequest = (playerId) =>
+    new Request("https://match.internal/schedule-private-house-invite", {
+      method: "POST",
+      headers: {
+        Authorization: "Bearer first-seat-token",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ accountId: hostAccountId, inviteHash, playerId }),
+    });
+
+  const scheduled = await atTime(now, () => harness.object.fetch(scheduleRequest(player.playerId)));
+  assert.equal(scheduled.status, 200);
+  const scheduledBody = await scheduled.json();
+  assert.ok(scheduledBody.fallbackAt >= now + 8_000);
+  assert.ok(scheduledBody.fallbackAt <= now + 60_000);
+  assert.equal(harness.values.get("match").aiFallbackPlayerId, player.playerId);
+  assert.equal(await harness.storage.getAlarm(), scheduledBody.fallbackAt);
+
+  const retry = await atTime(now + 1, () => harness.object.fetch(scheduleRequest(player.playerId)));
+  assert.equal(retry.status, 200);
+  assert.deepEqual(await retry.json(), scheduledBody);
+  const secondInvite = await atTime(now + 2, () =>
+    harness.object.fetch(scheduleRequest(otherPlayer.playerId)),
+  );
+  assert.equal(secondInvite.status, 409);
+
+  await atTime(scheduledBody.fallbackAt, () => harness.object.alarm());
+  const joined = harness.values.get("match");
+  assert.equal(joined.seats[1].kind, "ai");
+  assert.equal(joined.seats[1].inHousePlayerId, player.playerId);
+  assert.equal(joined.aiFallbackAt, null);
+  assert.equal(joined.aiFallbackPlayerId, null);
+});
+
+test("a human joining a private room cancels a scheduled in-house fallback", async () => {
+  const hostAccountId = "7f25c8d9-07b8-4e2c-9fc1-288019d41f4b";
+  const inviteHash = "verified-invite-hash";
+  const player = IN_HOUSE_PLAYERS[0];
+  const match = {
+    ...makeWaitingMatch("first-seat-token", now + 24 * 60 * 60_000),
+    visibility: "invite",
+    expiresAt: now + 24 * 60 * 60_000,
+  };
+  match.seats[0].accountId = hostAccountId;
+  const harness = makeObject(match, [], { APP_ENV: "development" });
+  await harness.storage.put("invite-hash", inviteHash);
+  const scheduled = await atTime(now, () =>
+    harness.object.fetch(
+      new Request("https://match.internal/schedule-private-house-invite", {
+        method: "POST",
+        headers: {
+          Authorization: "Bearer first-seat-token",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ accountId: hostAccountId, inviteHash, playerId: player.playerId }),
+      }),
+    ),
+  );
+  assert.equal(scheduled.status, 200);
+
+  const humanJoin = await atTime(now + 1_000, () =>
+    harness.object.fetch(
+      new Request("https://match.internal/join", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          inviteHash,
+          seatTokenHash: "human-seat-hash",
+          displayName: "Guest Player",
+          accountId: null,
+          clientSupportedGames: { "connect-four": [1, 2] },
+          clientRulesVersion: 1,
+          now: now + 1_000,
+        }),
+      }),
+    ),
+  );
+  assert.equal(humanJoin.status, 200);
+  const joined = harness.values.get("match");
+  assert.equal(joined.seats[1].accountId, null);
+  assert.equal(joined.seats[1].displayName, "Guest Player");
+  assert.equal(joined.aiFallbackAt, null);
+  assert.equal(joined.aiFallbackPlayerId, null);
 });

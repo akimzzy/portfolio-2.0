@@ -88,7 +88,7 @@ export default function MatchApp({
     accountSession.getSnapshot,
     accountSession.getSnapshot,
   );
-  const inviteableFriends = account.friends.filter((friend) => !friend.inHouse);
+  const inviteableFriends = account.friends;
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [detailsTab, setDetailsTab] = useState<"match" | "rules">("match");
   const [onlineGuideKeyOpen, setOnlineGuideKeyOpen] = useState<string | null>(null);
@@ -1313,12 +1313,18 @@ export default function MatchApp({
                               );
                               const atLimit =
                                 match.onlineDialog!.invitedFriendshipIds.length >= 10 && !checked;
+                              const selectedInHouseFriend = inviteableFriends.some(
+                                (candidate) =>
+                                  candidate.inHouse &&
+                                  candidate.id !== friend.id &&
+                                  match.onlineDialog!.invitedFriendshipIds.includes(candidate.id),
+                              );
                               return (
                                 <label className="invite-friend-option" key={friend.id}>
                                   <input
                                     type="checkbox"
                                     checked={checked}
-                                    disabled={atLimit}
+                                    disabled={atLimit || (friend.inHouse && selectedInHouseFriend)}
                                     onChange={(event) => {
                                       const selected = new Set(
                                         match.onlineDialog?.invitedFriendshipIds ?? [],

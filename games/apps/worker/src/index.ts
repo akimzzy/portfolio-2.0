@@ -23,6 +23,7 @@ const INVITE_TTL_MS = 24 * 60 * 60_000;
 const COUNTDOWN_MS = 2_000;
 const PUBLIC_AI_FALLBACK_MIN_MS = 8_000;
 const PUBLIC_AI_FALLBACK_MAX_MS = 60_000;
+const PRIVATE_HOUSE_CLAIM_RETRY_MS = 5_000;
 const NEXT_GAME_TIMEOUT_MS = 30_000;
 const TERMINAL_MATCH_RETENTION_MS = 24 * 60 * 60_000;
 const AUTH_TIMEOUT_MS = 8_000;
@@ -61,6 +62,8 @@ type Match = {
   expiresAt: number;
   retentionDeadline?: number | null;
   aiFallbackAt?: number | null;
+  aiFallbackPlayerId?: string | null;
+  aiFallbackRetryUsed?: boolean;
   revision: number;
   state: unknown | null;
   seats: [Seat | null, Seat | null];
@@ -489,10 +492,15 @@ function cors(request: Request, env: WorkerEnv): HeadersInit {
 function createId(): string {
   return token(16).replaceAll("-", "X").replaceAll("_", "Y").slice(0, 22);
 }
+function randomBetween(minimum: number, maximum: number): number {
+  return minimum + Math.floor(Math.random() * (maximum - minimum + 1));
+}
 function publicAiFallbackAt(createdAt: number, expiresAt: number): number {
-  const earliest = createdAt + PUBLIC_AI_FALLBACK_MIN_MS;
-  const latest = Math.min(expiresAt, createdAt + PUBLIC_AI_FALLBACK_MAX_MS);
-  return earliest + Math.floor(Math.random() * (latest - earliest + 1));
+  const latestDelay = Math.max(
+    PUBLIC_AI_FALLBACK_MIN_MS,
+    Math.min(PUBLIC_AI_FALLBACK_MAX_MS, expiresAt - createdAt),
+  );
+  return createdAt + randomBetween(PUBLIC_AI_FALLBACK_MIN_MS, latestDelay);
 }
 function fallbackDisplayName(matchId: string, seatIndex: number): string {
   let value = 2_166_136_261 ^ (seatIndex * 2_246_822_519);
@@ -690,6 +698,11 @@ function normalizeMatch(match: Match): Match {
       typeof match.aiFallbackAt === "number" && Number.isFinite(match.aiFallbackAt)
         ? match.aiFallbackAt
         : null,
+    aiFallbackPlayerId:
+      typeof match.aiFallbackPlayerId === "string" && localHousePlayer(match.aiFallbackPlayerId)
+        ? match.aiFallbackPlayerId
+        : null,
+    aiFallbackRetryUsed: match.aiFallbackRetryUsed === true,
     gameId: typeof match.gameId === "string" ? match.gameId : "connect-four",
     rulesVersion:
       Number.isSafeInteger(match.rulesVersion) && match.rulesVersion > 0 ? match.rulesVersion : 1,
@@ -1005,6 +1018,8 @@ export default {
         retentionDeadline: null,
         expiresAt: now + (visibility === "public" ? ROOM_TTL_MS : INVITE_TTL_MS),
         aiFallbackAt: visibility === "public" ? publicAiFallbackAt(now, now + ROOM_TTL_MS) : null,
+        aiFallbackPlayerId: null,
+        aiFallbackRetryUsed: false,
         revision: 0,
         state: null,
         roundHistory: [],
@@ -1324,30 +1339,39 @@ export default {
       const seatToken = request.headers.get("x-match-seat-token");
       const inviteToken = values.inviteToken;
       const friendshipIds = values.friendshipIds;
+      const inHouseFriendshipIds =
+        values.inHouseFriendshipIds === undefined ? [] : values.inHouseFriendshipIds;
+      const validFriendshipIds = (value: unknown): value is string[] =>
+        Array.isArray(value) &&
+        value.every(
+          (friendshipId) =>
+            typeof friendshipId === "string" && /^[0-9a-f-]{36}$/i.test(friendshipId),
+        ) &&
+        new Set(value).size === value.length;
       if (
         !seatToken ||
         seatToken.length > 128 ||
         typeof inviteToken !== "string" ||
         !/^[A-Za-z0-9_-]{43}$/.test(inviteToken) ||
-        !Array.isArray(friendshipIds) ||
-        friendshipIds.length < 1 ||
-        friendshipIds.length > 10 ||
-        friendshipIds.some(
-          (value) => typeof value !== "string" || !/^[0-9a-f-]{36}$/i.test(value),
-        ) ||
-        new Set(friendshipIds).size !== friendshipIds.length
+        !validFriendshipIds(friendshipIds) ||
+        !validFriendshipIds(inHouseFriendshipIds) ||
+        friendshipIds.length + inHouseFriendshipIds.length < 1 ||
+        friendshipIds.length + inHouseFriendshipIds.length > 10 ||
+        inHouseFriendshipIds.length > 1 ||
+        friendshipIds.some((friendshipId) => inHouseFriendshipIds.includes(friendshipId))
       )
         return json({ error: "invalid-invite-request" }, 400, headers);
 
       const account = await resolveAccountIdentity(request, env);
       if (!account.ok) return json(await account.response.json(), account.response.status, headers);
       if (!account.identity) return json({ error: "account-session-required" }, 401, headers);
+      const inviteHash = await hash(inviteToken);
       const room = await stub.fetch(
         new Request("https://match.internal/authorize-invites", {
           method: "POST",
           headers: { "Content-Type": "application/json", Authorization: `Bearer ${seatToken}` },
           body: JSON.stringify({
-            inviteHash: await hash(inviteToken),
+            inviteHash,
             accountId: account.identity.userId,
           }),
         }),
@@ -1363,17 +1387,73 @@ export default {
       )
         return json({ error: "room-unavailable" }, 409, headers);
       try {
-        const invitedCount = await supabaseRpc<number>(env, "create_private_match_invites", {
+        const invitation = await supabaseRpc<{
+          invited_count: number;
+          in_house_player_ids: string[];
+        }>(env, "create_private_match_invites_v2", {
           p_match_id: id,
           p_game_id: roomDetails.gameId,
           p_series_target: roomDetails.seriesTarget,
           p_invite_token: inviteToken,
           p_friendship_ids: friendshipIds,
+          p_in_house_friendship_ids: inHouseFriendshipIds,
           p_sender_id: account.identity.userId,
         });
-        if (invitedCount !== friendshipIds.length)
+        if (
+          !invitation ||
+          invitation.invited_count !== friendshipIds.length ||
+          !Array.isArray(invitation.in_house_player_ids) ||
+          invitation.in_house_player_ids.length !== inHouseFriendshipIds.length ||
+          invitation.in_house_player_ids.some(
+            (playerId) => typeof playerId !== "string" || !inHouseDifficultyForPlayer(playerId),
+          )
+        )
           return json({ error: "friend-invites-unconfirmed" }, 503, headers);
-        return json({ invitedCount }, 201, headers);
+        for (const playerId of invitation.in_house_player_ids) {
+          const scheduled = await stub.fetch(
+            new Request("https://match.internal/schedule-private-house-invite", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${seatToken}`,
+              },
+              body: JSON.stringify({
+                accountId: account.identity.userId,
+                inviteHash,
+                playerId,
+              }),
+            }),
+          );
+          if (!scheduled.ok) {
+            let scheduleError: unknown;
+            try {
+              scheduleError = await scheduled.json();
+            } catch {
+              scheduleError = null;
+            }
+            if (
+              scheduled.status === 409 &&
+              scheduleError !== null &&
+              typeof scheduleError === "object" &&
+              "error" in scheduleError &&
+              scheduleError.error === "room-full"
+            )
+              return json(
+                { invitedCount: friendshipIds.length, inHouseInviteScheduled: false },
+                201,
+                headers,
+              );
+            return json({ error: "friend-invites-unconfirmed" }, 503, headers);
+          }
+        }
+        return json(
+          {
+            invitedCount: friendshipIds.length + invitation.in_house_player_ids.length,
+            inHouseInviteScheduled: true,
+          },
+          201,
+          headers,
+        );
       } catch {
         return json({ error: "friend-invites-unavailable" }, 503, headers);
       }
@@ -1664,6 +1744,8 @@ export class MatchDurableObject {
       return this.serializeMutation(() => this.preview(request));
     if (operation === "authorize-invites" && request.method === "POST")
       return this.authorizePrivateInvites(request);
+    if (operation === "schedule-private-house-invite" && request.method === "POST")
+      return this.serializeMutation(() => this.schedulePrivateHouseInvite(request));
     if (operation === "cancel" && request.method === "POST")
       return this.serializeMutation(() => this.cancelWaitingRoom(request));
     if (operation === "leave" && request.method === "POST")
@@ -1712,6 +1794,49 @@ export class MatchDurableObject {
     )
       return json({ error: "room-unavailable" }, 409);
     return json({ gameId: match.gameId, seriesTarget: match.seriesTarget });
+  }
+
+  private async schedulePrivateHouseInvite(request: Request): Promise<Response> {
+    const match = await this.load();
+    const credential = request.headers.get("authorization")?.replace(/^Bearer\s+/i, "");
+    const input = await body(request);
+    if (!match || !credential || !input || typeof input !== "object" || Array.isArray(input))
+      return json({ error: "room-unavailable" }, 404);
+    const values = input as Record<string, unknown>;
+    const host = match.seats[0];
+    const playerId = values.playerId;
+    if (
+      match.visibility !== "invite" ||
+      match.status !== "waiting" ||
+      match.expiresAt <= Date.now() ||
+      !host?.tokenHash ||
+      host.tokenHash !== (await hash(credential)) ||
+      typeof values.accountId !== "string" ||
+      host.accountId !== values.accountId ||
+      typeof values.inviteHash !== "string" ||
+      values.inviteHash !== (await this.ctx.storage.get<string>("invite-hash")) ||
+      typeof playerId !== "string" ||
+      !localHousePlayer(playerId) ||
+      !opponentProviderForGame(match.gameId)
+    )
+      return json({ error: "room-unavailable" }, 409);
+    if (match.seats[1]) return json({ error: "room-full" }, 409);
+    if (match.aiFallbackAt && match.aiFallbackPlayerId === playerId)
+      return json({ fallbackAt: match.aiFallbackAt });
+    if (match.aiFallbackAt) return json({ error: "house-invite-already-scheduled" }, 409);
+
+    const now = Date.now();
+    match.aiFallbackAt = Math.min(
+      match.expiresAt - 1,
+      now + randomBetween(PUBLIC_AI_FALLBACK_MIN_MS, PUBLIC_AI_FALLBACK_MAX_MS),
+    );
+    match.aiFallbackPlayerId = playerId;
+    match.aiFallbackRetryUsed = false;
+    match.revision += 1;
+    await this.save(match);
+    await this.schedule(match);
+    this.broadcast({ type: "match", match: snapshot(match) });
+    return json({ fallbackAt: match.aiFallbackAt });
   }
 
   private async join(request: Request): Promise<Response> {
@@ -1766,6 +1891,8 @@ export class MatchDurableObject {
       disconnectedAt: null,
     };
     match.aiFallbackAt = null;
+    match.aiFallbackPlayerId = null;
+    match.aiFallbackRetryUsed = false;
     match.revision += 1;
     await this.save(match);
     await this.removeFromLobby(match);
@@ -2478,13 +2605,32 @@ export class MatchDurableObject {
       if (provider && game) {
         const seed = crypto.getRandomValues(new Uint32Array(1))[0] ?? 1;
         let housePlayer: InHousePlayer | null = null;
+        let houseClaimError: unknown = null;
         try {
-          housePlayer = await claimAnyHousePlayer(this.env, match.id);
-        } catch {
+          housePlayer = match.aiFallbackPlayerId
+            ? await claimHousePlayer(this.env, match.aiFallbackPlayerId, match.id)
+            : await claimAnyHousePlayer(this.env, match.id);
+        } catch (error) {
+          houseClaimError = error;
           /* No server-side roster claim means we keep the room human-joinable. */
         }
         if (!housePlayer) {
+          if (
+            match.aiFallbackPlayerId &&
+            !match.aiFallbackRetryUsed &&
+            isRetryableSupabaseFailure(houseClaimError)
+          ) {
+            match.aiFallbackRetryUsed = true;
+            match.aiFallbackAt = Math.min(match.expiresAt - 1, now + PRIVATE_HOUSE_CLAIM_RETRY_MS);
+            match.revision += 1;
+            await this.save(match);
+            await this.schedule(match);
+            this.broadcast({ type: "match", match: snapshot(match) });
+            return;
+          }
           match.aiFallbackAt = null;
+          match.aiFallbackPlayerId = null;
+          match.aiFallbackRetryUsed = false;
           match.revision += 1;
           await this.save(match);
           await this.schedule(match);
@@ -2494,6 +2640,8 @@ export class MatchDurableObject {
         const profileId = inHouseDifficultyForPlayer(housePlayer.player_id);
         if (!profileId) {
           match.aiFallbackAt = null;
+          match.aiFallbackPlayerId = null;
+          match.aiFallbackRetryUsed = false;
           match.revision += 1;
           await this.save(match);
           await this.schedule(match);
@@ -2519,6 +2667,8 @@ export class MatchDurableObject {
         match.aiRematchesAllowed = aiRematchLimit(seed);
         match.aiRematchesUsed = 0;
         match.aiFallbackAt = null;
+        match.aiFallbackPlayerId = null;
+        match.aiFallbackRetryUsed = false;
         if (match.seats[0]?.connected) {
           match.status = "countdown";
           match.countdownAt = now + COUNTDOWN_MS;

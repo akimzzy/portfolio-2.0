@@ -781,7 +781,7 @@ export function createGameController() {
       const statuses = {
         waiting: match?.seatKinds?.includes("ai")
           ? "Connected"
-          : match?.aiFallbackAt
+          : match?.visibility === "public" && match.aiFallbackAt
             ? "Finding a player"
             : multiplayer.seat === "first"
               ? "Game link ready"
@@ -1554,10 +1554,21 @@ export function createGameController() {
           closeLabel: "Done",
         });
         if (inviteFriends && result.inviteToken) {
+          const selectedFriendIds = new Set(invitedFriendshipIds);
+          const selectedFriends = accountSession
+            .getSnapshot()
+            .friends.filter((friend) => selectedFriendIds.has(friend.id));
+          const friendshipIds = selectedFriends
+            .filter((friend) => !friend.inHouse)
+            .map((friend) => friend.id);
+          const inHouseFriendshipIds = selectedFriends
+            .filter((friend) => friend.inHouse)
+            .map((friend) => friend.id);
           void matchApi
             .createPrivateMatchInvites(result.matchId, result.seatToken, {
               inviteToken: result.inviteToken,
-              friendshipIds: invitedFriendshipIds,
+              friendshipIds,
+              inHouseFriendshipIds,
             })
             .then((response) => {
               const invitedCount = response.body.invitedCount;
@@ -1569,7 +1580,12 @@ export function createGameController() {
                 );
               if (onlineDialogView?.mode === "invite" && onlineDialogView.inviteLink === link.href)
                 updateOnlineDialog({
-                  description: `Invite sent to ${invitedCount} ${invitedCount === 1 ? "friend" : "friends"}.`,
+                  description:
+                    response.body.inHouseInviteScheduled === false
+                      ? friendshipIds.length > 0
+                        ? `Invites sent to ${friendshipIds.length} ${friendshipIds.length === 1 ? "friend" : "friends"}. A player joined before your selected friend could.`
+                        : "A player joined before your selected friend could."
+                      : `Invite sent to ${invitedCount} ${invitedCount === 1 ? "friend" : "friends"}.`,
                 });
             })
             .catch((inviteError: unknown) => {
