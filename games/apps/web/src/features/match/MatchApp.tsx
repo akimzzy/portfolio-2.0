@@ -88,6 +88,7 @@ export default function MatchApp({
     accountSession.getSnapshot,
     accountSession.getSnapshot,
   );
+  const inviteableFriends = account.friends.filter((friend) => !friend.inHouse);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [detailsTab, setDetailsTab] = useState<"match" | "rules">("match");
   const [onlineGuideKeyOpen, setOnlineGuideKeyOpen] = useState<string | null>(null);
@@ -1302,11 +1303,11 @@ export default function MatchApp({
                           >
                             Try again
                           </button>
-                        ) : account.friends.length === 0 ? (
+                        ) : inviteableFriends.length === 0 ? (
                           <p className="invite-friends-note">Add friends from your account.</p>
                         ) : (
                           <div className="invite-friends-list">
-                            {account.friends.map((friend) => {
+                            {inviteableFriends.map((friend) => {
                               const checked = match.onlineDialog?.invitedFriendshipIds.includes(
                                 friend.id,
                               );
@@ -1335,7 +1336,7 @@ export default function MatchApp({
                             })}
                           </div>
                         )}
-                        {account.friends.length > 0 && (
+                        {inviteableFriends.length > 0 && (
                           <p className="invite-friends-note">First friend to join gets the seat.</p>
                         )}
                       </fieldset>

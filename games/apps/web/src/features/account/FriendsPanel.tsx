@@ -73,6 +73,25 @@ export function FriendsPanel({
       void accountSession.loadMatchInvites();
   }, [active, friendsView, previewMode]);
 
+  useEffect(() => {
+    if (!active || previewMode) return;
+    const fetchedAt = account.friendsFetchedAt;
+    if (fetchedAt === null) return;
+    const nextAcceptance = account.outgoingFriendRequests
+      .map((request) => request.autoAcceptInMs)
+      .filter((value): value is number => value !== null && Number.isSafeInteger(value))
+      .map((remainingMs) => fetchedAt + remainingMs)
+      .reduce<number | null>(
+        (earliest, timestamp) => (earliest === null || timestamp < earliest ? timestamp : earliest),
+        null,
+      );
+    if (nextAcceptance === null) return;
+
+    const refreshAt = Math.max(0, nextAcceptance - Date.now() + 250);
+    const timer = window.setTimeout(() => void accountSession.loadFriends(true), refreshAt);
+    return () => window.clearTimeout(timer);
+  }, [active, account.friendsFetchedAt, account.outgoingFriendRequests, previewMode]);
+
   const searchPlayer = useCallback(async (input: string, force = false) => {
     const query = input.trim().replace(/^@/, "");
     if (
@@ -212,6 +231,7 @@ export function FriendsPanel({
                   {
                     id: request.id,
                     username: request.username,
+                    inHouse: false,
                     since: new Date().toISOString(),
                     seriesPlayed: 0,
                     wins: 0,
@@ -320,7 +340,7 @@ export function FriendsPanel({
   const requestState = (result: FriendLookup) => {
     if (result.status === "accepted") return "Already on your friends list.";
     if (result.status === "pending" && result.requestedByYou)
-      return "Your request is waiting for them.";
+      return result.inHouse ? "Request sent." : "Your request is waiting for them.";
     if (result.status === "pending")
       return "They’ve already sent you a request. Open Requests to respond.";
     return null;
@@ -330,7 +350,13 @@ export function FriendsPanel({
     <li className="account-friend-row" key={request.id}>
       <div className="account-friend-identity">
         <strong>@{request.username}</strong>
-        <span>{kind === "incoming" ? "Wants to connect" : "Waiting for acceptance"}</span>
+        <span>
+          {kind === "incoming"
+            ? "Wants to connect"
+            : request.autoAcceptAt
+              ? "Request sent"
+              : "Waiting for acceptance"}
+        </span>
       </div>
       {kind === "incoming" ? (
         <div className="account-friend-actions">
@@ -368,6 +394,36 @@ export function FriendsPanel({
   const outgoingRequests = previewMode ? previewState.outgoing : account.outgoingFriendRequests;
   const friends = previewMode ? previewState.friends : account.friends;
   const lookupStatus = lookup ? requestState(lookup) : null;
+
+  useEffect(() => {
+    if (!lookup?.inHouse) return;
+    const normalizedUsername = lookup.username.toLocaleLowerCase();
+    if (
+      friends.some(
+        (friend) => friend.inHouse && friend.username.toLocaleLowerCase() === normalizedUsername,
+      ) &&
+      (lookup.status !== "accepted" || lookup.requestedByYou !== true)
+    ) {
+      setLookup((current) =>
+        current?.inHouse && current.username.toLocaleLowerCase() === normalizedUsername
+          ? { ...current, status: "accepted", requestedByYou: true }
+          : current,
+      );
+      return;
+    }
+    if (
+      outgoingRequests.some(
+        (request) => request.username.toLocaleLowerCase() === normalizedUsername,
+      ) &&
+      (lookup.status !== "pending" || lookup.requestedByYou !== true)
+    ) {
+      setLookup((current) =>
+        current?.inHouse && current.username.toLocaleLowerCase() === normalizedUsername
+          ? { ...current, status: "pending", requestedByYou: true }
+          : current,
+      );
+    }
+  }, [friends, lookup, outgoingRequests]);
 
   return (
     <section className="account-friends" aria-label="Friends">

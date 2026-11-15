@@ -50,6 +50,7 @@ export type GameHistoryDetails = Readonly<{
 export type FriendRecord = Readonly<{
   id: string;
   username: string;
+  inHouse: boolean;
   since: string;
   seriesPlayed: number;
   wins: number;
@@ -59,7 +60,13 @@ export type FriendMatchHistoryPage = Readonly<{
   matches: GameHistoryEntry[];
   hasMore: boolean;
 }>;
-export type FriendRequest = Readonly<{ id: string; username: string; requestedAt: string }>;
+export type FriendRequest = Readonly<{
+  id: string;
+  username: string;
+  requestedAt: string;
+  autoAcceptAt: string | null;
+  autoAcceptInMs: number | null;
+}>;
 export type FriendMatchInvite = Readonly<{
   id: string;
   matchId: string;
@@ -72,6 +79,7 @@ export type FriendMatchInvite = Readonly<{
 }>;
 export type FriendLookup = Readonly<{
   username: string;
+  inHouse: boolean;
   status: "pending" | "accepted" | "declined" | "cancelled" | "removed" | null;
   requestedByYou: boolean | null;
 }>;
@@ -771,8 +779,17 @@ export class AccountSession {
     const userId = this.session?.user.id;
     if (!this.client || !userId || this.snapshot.status !== "signed-in") return;
     if (this.friendsInFlight && this.friendsUserId === userId) return this.friendsInFlight;
+    const friendsFetchedAt = this.snapshot.friendsFetchedAt;
+    const hasDueInHouseAcceptance =
+      friendsFetchedAt !== null &&
+      this.snapshot.outgoingFriendRequests.some(
+        (request) =>
+          request.autoAcceptInMs !== null &&
+          Date.now() - friendsFetchedAt >= request.autoAcceptInMs,
+      );
     if (
       !force &&
+      !hasDueInHouseAcceptance &&
       this.friendsUserId === userId &&
       this.snapshot.friendsFetchedAt !== null &&
       Date.now() - this.snapshot.friendsFetchedAt < FRIENDS_CACHE_TTL_MS
@@ -812,6 +829,7 @@ export class AccountSession {
                 {
                   id: row.id,
                   username: row.username,
+                  inHouse: row.in_house === true,
                   since: row.since,
                   seriesPlayed: row.series_played as number,
                   wins: row.wins as number,
@@ -832,7 +850,26 @@ export class AccountSession {
                   !Number.isFinite(Date.parse(row.requested_at))
                 )
                   return [];
-                return [{ id: row.id, username: row.username, requestedAt: row.requested_at }];
+                const autoAcceptAt =
+                  typeof row.auto_accept_at === "string" &&
+                  Number.isFinite(Date.parse(row.auto_accept_at))
+                    ? row.auto_accept_at
+                    : null;
+                const autoAcceptInMs =
+                  typeof row.auto_accept_in_ms === "number" &&
+                  Number.isSafeInteger(row.auto_accept_in_ms) &&
+                  row.auto_accept_in_ms >= 0
+                    ? row.auto_accept_in_ms
+                    : null;
+                return [
+                  {
+                    id: row.id,
+                    username: row.username,
+                    requestedAt: row.requested_at,
+                    autoAcceptAt,
+                    autoAcceptInMs,
+                  },
+                ];
               })
             : [];
         this.update({
@@ -1131,6 +1168,7 @@ export class AccountSession {
       throw new Error("Player details could not be read. Try again.");
     return {
       username: row.username,
+      inHouse: row.in_house === true,
       status: row.status as FriendLookup["status"],
       requestedByYou: row.requested_by_you as boolean | null,
     };
@@ -1144,14 +1182,32 @@ export class AccountSession {
       });
       if (error) throw new Error(friendErrorMessage(error.message));
       if (this.session?.user.id !== userId) return;
-      const requestId =
-        data && typeof data === "object" ? (data as Record<string, unknown>).id : null;
+      const response = data && typeof data === "object" ? (data as Record<string, unknown>) : {};
+      const requestId = response.id;
+      const autoAcceptAt =
+        typeof response.auto_accept_at === "string" &&
+        Number.isFinite(Date.parse(response.auto_accept_at))
+          ? response.auto_accept_at
+          : null;
+      const autoAcceptInMs =
+        typeof response.auto_accept_in_ms === "number" &&
+        Number.isSafeInteger(response.auto_accept_in_ms) &&
+        response.auto_accept_in_ms >= 0
+          ? response.auto_accept_in_ms
+          : null;
       if (typeof requestId === "string") {
         this.update({
           outgoingFriendRequests: [
             ...this.snapshot.outgoingFriendRequests,
-            { id: requestId, username: username.trim(), requestedAt: new Date().toISOString() },
+            {
+              id: requestId,
+              username: username.trim(),
+              requestedAt: new Date().toISOString(),
+              autoAcceptAt,
+              autoAcceptInMs,
+            },
           ],
+          friendsFetchedAt: Date.now(),
         });
       }
     });
@@ -1186,6 +1242,7 @@ export class AccountSession {
                 {
                   id,
                   username: request.username,
+                  inHouse: false,
                   since: new Date().toISOString(),
                   seriesPlayed: 0,
                   wins: 0,
