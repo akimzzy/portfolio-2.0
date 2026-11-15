@@ -187,6 +187,7 @@ export function createMatchViewSnapshot(input: MatchViewModelInput): MatchViewSn
   const players = (["first", "second"] as const).map((seat) => {
     const name = playerName(seat);
     const reversiColor = playerColorStarter ? reversiDiscColor(seat, playerColorStarter) : null;
+    const ticTacToeMark = seat === startingPlayer ? "X" : "O";
     const seatLabel = isOnline
       ? match.connectedSeats?.[seat === "first" ? 0 : 1]
         ? effectiveGameId === "reversi"
@@ -196,9 +197,11 @@ export function createMatchViewSnapshot(input: MatchViewModelInput): MatchViewSn
               ? "Player 1"
               : "Player 2"
           : startingPlayer
-            ? seat === startingPlayer
-              ? "Goes first"
-              : "Goes second"
+            ? effectiveGameId === "tic-tac-toe"
+              ? `${ticTacToeMark} · ${seat === startingPlayer ? "Goes first" : "Goes second"}`
+              : seat === startingPlayer
+                ? "Goes first"
+                : "Goes second"
             : seat === "first"
               ? "Player 1"
               : "Player 2"
@@ -207,9 +210,11 @@ export function createMatchViewSnapshot(input: MatchViewModelInput): MatchViewSn
           : match.status === "waiting" && seat === "second"
             ? "Waiting for player"
             : "Offline"
-      : seat === startingPlayer
-        ? "Goes first"
-        : "Goes second";
+      : effectiveGameId === "tic-tac-toe"
+        ? `${ticTacToeMark} · ${seat === startingPlayer ? "Goes first" : "Goes second"}`
+        : seat === startingPlayer
+          ? "Goes first"
+          : "Goes second";
     const pendingWin = revealingWin && pendingWinSeat === seat ? 1 : 0;
     return {
       seat,

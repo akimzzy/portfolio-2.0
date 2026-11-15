@@ -1,5 +1,6 @@
 import { CONNECT_FOUR_DIFFICULTIES } from "@portfolio-games/connect-four/opponents";
 import { REVERSI_DIFFICULTIES } from "@portfolio-games/reversi/opponents";
+import { TIC_TAC_TOE_DIFFICULTIES } from "@portfolio-games/tic-tac-toe/opponents";
 
 export type GameOpponentProfile = Readonly<{
   gameId: string;
@@ -14,6 +15,9 @@ const profiles: readonly GameOpponentProfile[] = Object.freeze([
     Object.freeze({ gameId: "connect-four", ...profile }),
   ),
   ...REVERSI_DIFFICULTIES.map((profile) => Object.freeze({ gameId: "reversi", ...profile })),
+  ...TIC_TAC_TOE_DIFFICULTIES.map((profile) =>
+    Object.freeze({ gameId: "tic-tac-toe", ...profile }),
+  ),
 ]);
 
 export function opponentProfilesForGame(gameId: string): readonly GameOpponentProfile[] {

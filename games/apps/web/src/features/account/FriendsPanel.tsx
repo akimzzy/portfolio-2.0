@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { Button } from "../../components/Button";
 import { AccountConfirmDialog } from "../../components/AccountConfirmDialog";
+import { GAME_CATALOG } from "../../games/registry.js";
 import { FriendMatchup } from "./FriendMatchup";
 import {
   accountSession,
@@ -277,7 +278,7 @@ export function FriendsPanel({
       <div className="account-match-invite-copy">
         <strong>@{invite.senderUsername}</strong>
         <span>
-          {invite.gameId === "reversi" ? "Reversi" : "Connect Four"} ·
+          {GAME_CATALOG.find((game) => game.id === invite.gameId)?.title ?? "Game"} ·
           {invite.seriesTarget === 1 ? " One game" : ` First to ${invite.seriesTarget}`}
         </span>
       </div>

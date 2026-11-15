@@ -18,6 +18,11 @@ import {
   isReversiDifficulty,
   isReversiOpponentId,
 } from "@portfolio-games/reversi/opponents";
+import {
+  chooseTicTacToeMove,
+  TIC_TAC_TOE_AI_ENGINE_VERSION,
+} from "@portfolio-games/tic-tac-toe/ai";
+import { isTicTacToeDifficulty } from "@portfolio-games/tic-tac-toe/opponents";
 
 export type WorkerOpponentProvider = Readonly<{
   gameId: string;
@@ -93,6 +98,34 @@ const providers: readonly WorkerOpponentProvider[] = Object.freeze([
         seed,
         engineVersion,
       );
+    },
+  }),
+  Object.freeze({
+    gameId: "tic-tac-toe",
+    currentEngineVersion: TIC_TAC_TOE_AI_ENGINE_VERSION,
+    defaultProfileId: "medium",
+    supportsEngineVersion: (engineVersion: number) =>
+      engineVersion === TIC_TAC_TOE_AI_ENGINE_VERSION,
+    supportsProfile: isTicTacToeDifficulty,
+    profileEngineVersion(profileId: string) {
+      return isTicTacToeDifficulty(profileId) ? TIC_TAC_TOE_AI_ENGINE_VERSION : null;
+    },
+    chooseAction(
+      state: unknown,
+      seat: PlayerSeat,
+      profileId: string,
+      seed: number,
+      engineVersion: number,
+    ) {
+      if (engineVersion !== TIC_TAC_TOE_AI_ENGINE_VERSION || !isTicTacToeDifficulty(profileId))
+        throw new RangeError("Unsupported Tic-tac-toe opponent profile.");
+      const action = chooseTicTacToeMove(
+        state as import("@portfolio-games/tic-tac-toe").TicTacToeState,
+        seat,
+        profileId,
+        seed,
+      );
+      return action;
     },
   }),
 ]);

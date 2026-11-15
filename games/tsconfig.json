@@ -4,6 +4,7 @@
     { "path": "./packages/contracts" },
     { "path": "./packages/connect-four" },
     { "path": "./packages/reversi" },
+    { "path": "./packages/tic-tac-toe" },
     { "path": "./apps/worker" }
   ]
 }

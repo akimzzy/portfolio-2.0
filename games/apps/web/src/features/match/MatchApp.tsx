@@ -135,6 +135,14 @@ export default function MatchApp({
     (match.gameState.startingPlayer === "first" || match.gameState.startingPlayer === "second")
       ? match.gameState.startingPlayer
       : null;
+  const ticTacToeStarter =
+    match.gameId === "tic-tac-toe" &&
+    typeof match.gameState === "object" &&
+    match.gameState !== null &&
+    "startingPlayer" in match.gameState &&
+    (match.gameState.startingPlayer === "first" || match.gameState.startingPlayer === "second")
+      ? match.gameState.startingPlayer
+      : null;
   const optionsExpanded = match.onlineDialog?.optionsExpanded ?? false;
   const onlineDialogMode = match.onlineDialog?.mode ?? null;
   const supportsIdentityChoice =
@@ -530,7 +538,13 @@ export default function MatchApp({
                   className={`player-token token-${player.seat}${reversiStarter ? ` disc-${reversiDiscColor(player.seat, reversiStarter)}` : ""}`}
                   aria-hidden="true"
                 >
-                  {player.seat === "first" ? "1" : "2"}
+                  {match.gameId === "tic-tac-toe"
+                    ? player.seat === ticTacToeStarter
+                      ? "X"
+                      : "O"
+                    : player.seat === "first"
+                      ? "1"
+                      : "2"}
                 </span>
                 <span className="player-copy">
                   <span className="player-name-line">

@@ -939,7 +939,7 @@ export class AccountSession {
                 typeof row.match_id !== "string" ||
                 !/^[A-Za-z0-9_-]{22}$/.test(row.match_id) ||
                 typeof row.game_id !== "string" ||
-                !["connect-four", "reversi"].includes(row.game_id) ||
+                !/^[a-z][a-z0-9-]{1,39}$/.test(row.game_id) ||
                 !Number.isSafeInteger(row.series_target) ||
                 ![1, 2, 3].includes(row.series_target as number) ||
                 typeof row.invite_token !== "string" ||

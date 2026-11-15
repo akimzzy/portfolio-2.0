@@ -1,7 +1,10 @@
 import type { PlayerSeat } from "@portfolio-games/contracts";
 import { COLUMNS, ROWS } from "@portfolio-games/connect-four";
 import { BOARD_SIZE } from "@portfolio-games/reversi";
+import { BOARD_SIZE as TIC_TAC_TOE_SIZE } from "@portfolio-games/tic-tac-toe";
 import { countReversiDiscs, reversiDiscColor } from "../match/games/reversi/presentation.js";
+import { TicTacToeMark } from "../match/games/tic-tac-toe/TicTacToeMark.js";
+import { ticTacToeSymbol } from "../match/games/tic-tac-toe/presentation.js";
 
 type BoardSnapshot = Readonly<{
   board: readonly (readonly (PlayerSeat | null)[])[];
@@ -103,6 +106,29 @@ function ReversiHistoryBoard({ snapshot }: { snapshot: BoardSnapshot }) {
   );
 }
 
+function TicTacToeHistoryBoard({ snapshot }: { snapshot: BoardSnapshot }) {
+  return (
+    <div className="tic-tac-toe-board-wrap account-history-tic-tac-toe-board">
+      <div className="tic-tac-toe-board" role="grid" aria-label="Tic-tac-toe final board">
+        {snapshot.board.map((row, rowIndex) => (
+          <div className="tic-tac-toe-row" role="row" key={rowIndex}>
+            {row.map((seat, columnIndex) => (
+              <div
+                className={`tic-tac-toe-cell${seat ? ` is-${seat}` : ""}`}
+                role="gridcell"
+                key={columnIndex}
+                aria-label={`Row ${rowIndex + 1}, column ${columnIndex + 1}: ${seat ? `Player ${seat === "first" ? "1" : "2"}` : "Empty"}`}
+              >
+                {seat && <TicTacToeMark symbol={ticTacToeSymbol(seat, snapshot.startingPlayer)} />}
+              </div>
+            ))}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export function HistoryBoard({ gameId, finalState }: { gameId: string; finalState: unknown }) {
   if (gameId === "connect-four") {
     const snapshot = parseBoardSnapshot(finalState, ROWS, COLUMNS);
@@ -113,6 +139,14 @@ export function HistoryBoard({ gameId, finalState }: { gameId: string; finalStat
     const snapshot = parseBoardSnapshot(finalState, BOARD_SIZE, BOARD_SIZE);
     return snapshot ? (
       <ReversiHistoryBoard snapshot={snapshot} />
+    ) : (
+      <p className="account-history-message">Board data is unavailable.</p>
+    );
+  }
+  if (gameId === "tic-tac-toe") {
+    const snapshot = parseBoardSnapshot(finalState, TIC_TAC_TOE_SIZE, TIC_TAC_TOE_SIZE);
+    return snapshot ? (
+      <TicTacToeHistoryBoard snapshot={snapshot} />
     ) : (
       <p className="account-history-message">Board data is unavailable.</p>
     );

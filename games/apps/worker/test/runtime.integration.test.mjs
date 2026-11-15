@@ -12,6 +12,10 @@ import {
   legalMoves as legalReversiMoves,
   RULES_VERSION as REVERSI_RULES_VERSION,
 } from "@portfolio-games/reversi";
+import {
+  parseTicTacToeState,
+  RULES_VERSION as TIC_TAC_TOE_RULES_VERSION,
+} from "@portfolio-games/tic-tac-toe";
 
 const gamesRoot = path.resolve(import.meta.dirname, "../../..");
 const origin = "http://localhost:4178";
@@ -575,6 +579,95 @@ test(
     );
     client.send({ type: "quick-message", message: "Nice move!" });
     assert.equal((await quickMessage).message, "Nice move!");
+  },
+);
+
+test(
+  "Tic-tac-toe is registered end to end and its server AI returns a legal reply",
+  { timeout: 30_000 },
+  async (t) => {
+    const port = await unusedPort();
+    const persistencePath = await mkdtemp(path.join(os.tmpdir(), "portfolio-games-tic-tac-toe-"));
+    let worker;
+    const clients = [];
+    t.after(async () => {
+      clients.forEach((client) => client.close());
+      if (worker) await stopWorker(worker.process);
+      await rm(persistencePath, { recursive: true, force: true });
+    });
+
+    worker = await startWorker(port, persistencePath);
+    const created = await api(worker.baseUrl, "/v1/matches/ai", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        gameId: "tic-tac-toe",
+        rulesVersion: TIC_TAC_TOE_RULES_VERSION,
+        profileId: "hard",
+        seriesTarget: 1,
+        displayName: "Test Player",
+      }),
+    });
+    assert.equal(created.response.status, 201);
+    assert.equal(created.body.gameId, "tic-tac-toe");
+    assert.equal(created.body.seat, "second");
+
+    const client = socketClient(worker.baseUrl, created.body.matchId, created.body.seatToken);
+    clients.push(client);
+    await client.openAndAuthenticate();
+    const activeEvent = await client.waitFor(
+      (payload) =>
+        payload.type === "match" &&
+        payload.match.status === "active" &&
+        payload.match.state !== null,
+    );
+    let active = activeEvent.match;
+    if (active.awaitingTurnReceipt?.seat === "second") {
+      client.send({ type: "turn-received", revision: active.revision });
+      active = (
+        await client.waitFor(
+          (payload) =>
+            payload.type === "match" &&
+            payload.match.status === "active" &&
+            payload.match.turnDeadline !== null,
+        )
+      ).match;
+    }
+
+    const initialState = parseTicTacToeState(active.state);
+    assert.equal(initialState.ok, true);
+    if (!initialState.ok) return;
+    assert.equal(initialState.value.nextPlayer, "second");
+    assert.ok(initialState.value.moves.length <= 1);
+    const firstEmptyCell = initialState.value.board
+      .flatMap((cells, rowIndex) =>
+        cells.map((cell, columnIndex) => (cell === null ? [rowIndex, columnIndex] : null)),
+      )
+      .find((cell) => cell !== null);
+    assert.ok(firstEmptyCell);
+    const [row, column] = firstEmptyCell;
+
+    const accepted = client.waitFor((payload) => payload.acceptedActionId === "ttt-human-move");
+    client.send({
+      protocolVersion: 1,
+      type: "submit-action",
+      gameId: "tic-tac-toe",
+      rulesVersion: TIC_TAC_TOE_RULES_VERSION,
+      matchId: created.body.matchId,
+      actionId: "ttt-human-move",
+      expectedRevision: active.revision,
+      action: { type: "place-mark", row, column },
+    });
+    const response = await accepted;
+    assert.equal(response.match.gameId, "tic-tac-toe");
+    assert.equal(response.match.status, "active");
+    assert.equal(response.match.state.moves.length, initialState.value.moves.length + 2);
+    assert.equal(response.match.state.nextPlayer, "second");
+    assert.equal(response.match.state.moves.at(-2)?.seat, "second");
+    assert.equal(response.match.state.moves.at(-1)?.seat, "first");
+    assert.equal(response.match.seatKinds[0], "ai");
+    assert.equal(response.match.seatKinds[1], "human");
+    assert.equal(parseTicTacToeState(response.match.state).ok, true);
   },
 );
 

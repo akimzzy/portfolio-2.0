@@ -52,6 +52,20 @@ const gameGuides: Readonly<
       source: "YouTube",
     },
   },
+  "tic-tac-toe": {
+    objective: "Make a line of three of your marks.",
+    turnHeading: "Take your turn",
+    steps: [
+      "Players take turns placing their mark in an empty square. X goes first; the player cards show each player’s mark.",
+      "Make three of your marks in a horizontal, vertical, or diagonal line to win.",
+    ],
+    endingHeading: "How the game ends",
+    ending:
+      "The first player to make a line of three wins. If all nine squares fill with no line, the game is a tie.",
+    timerHeading: "Turn timer",
+    turnLimit:
+      "You have 45 seconds for each turn. The clock resets on your next turn. If it reaches zero, your opponent wins this game.",
+  },
 };
 
 export function GameHowToPlay({ gameId }: { gameId: string }) {
