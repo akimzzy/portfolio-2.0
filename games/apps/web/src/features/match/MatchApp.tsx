@@ -12,6 +12,7 @@ import type { GameAppSnapshot } from "../../app/game-app-store";
 import {
   MATCH_REACTIONS,
   MAX_QUICK_MESSAGE_CHARS,
+  seriesFormatLabel,
   normalizeQuickMessage,
   QUICK_MESSAGE_HISTORY_LIMIT,
 } from "../../../../../packages/contracts/dist/index.js";
@@ -26,6 +27,7 @@ import { gameViews } from "./game-views";
 import { GameHowToPlay } from "./GameHowToPlay";
 import { reversiDiscColor } from "./games/reversi/presentation.js";
 import { accountSession } from "../account/account-session";
+import { CHECKERS_VARIANTS } from "@portfolio-games/checkers";
 
 type ReversiMovePresentation = {
   key: string;
@@ -137,6 +139,14 @@ export default function MatchApp({
       : null;
   const ticTacToeStarter =
     match.gameId === "tic-tac-toe" &&
+    typeof match.gameState === "object" &&
+    match.gameState !== null &&
+    "startingPlayer" in match.gameState &&
+    (match.gameState.startingPlayer === "first" || match.gameState.startingPlayer === "second")
+      ? match.gameState.startingPlayer
+      : null;
+  const checkersStarter =
+    match.gameId === "checkers" &&
     typeof match.gameState === "object" &&
     match.gameState !== null &&
     "startingPlayer" in match.gameState &&
@@ -535,16 +545,24 @@ export default function MatchApp({
                 key={player.seat}
               >
                 <span
-                  className={`player-token token-${player.seat}${reversiStarter ? ` disc-${reversiDiscColor(player.seat, reversiStarter)}` : ""}`}
+                  className={`player-token token-${player.seat}${reversiStarter ? ` disc-${reversiDiscColor(player.seat, reversiStarter)}` : ""}${checkersStarter ? ` disc-checkers-${player.seat === checkersStarter ? "red" : "white"}` : ""}`}
                   aria-hidden="true"
                 >
                   {match.gameId === "tic-tac-toe"
                     ? player.seat === ticTacToeStarter
                       ? "X"
                       : "O"
-                    : player.seat === "first"
-                      ? "1"
-                      : "2"}
+                    : match.gameId === "checkers"
+                      ? checkersStarter
+                        ? player.seat === checkersStarter
+                          ? "R"
+                          : "W"
+                        : player.seat === "first"
+                          ? "1"
+                          : "2"
+                      : player.seat === "first"
+                        ? "1"
+                        : "2"}
                 </span>
                 <span className="player-copy">
                   <span className="player-name-line">
@@ -972,13 +990,13 @@ export default function MatchApp({
                 <dd>{match.detail.status}</dd>
               </div>
             </dl>
-            <p className="match-details-note">Tied games add no wins and can extend the series.</p>
+            <p className="match-details-note">Tied games count toward the series limit.</p>
             {match.hasAiOpponent && (
               <p className="match-details-note">Your opponent is computer-controlled.</p>
             )}
           </div>
           <div id="match-rules-panel" hidden={detailsTab !== "rules"}>
-            <GameHowToPlay gameId={match.gameId} />
+            <GameHowToPlay gameId={match.gameId} rulesVersion={match.rulesVersion} />
           </div>
         </div>
       </dialog>
@@ -1160,7 +1178,12 @@ export default function MatchApp({
                       <path d={onlineGuideOpen ? "m3 7.5 3-3 3 3" : "m3 4.5 3 3 3-3"} />
                     </svg>
                   </button>
-                  {onlineGuideOpen && <GameHowToPlay gameId={match.gameId} />}
+                  {onlineGuideOpen && (
+                    <GameHowToPlay
+                      gameId={match.gameId}
+                      rulesVersion={match.onlineDialog.rulesVersion}
+                    />
+                  )}
                 </div>
               )}
               {(match.onlineDialog.mode === "create" ||
@@ -1277,6 +1300,30 @@ export default function MatchApp({
               )}
               {match.onlineDialog.mode === "create" && (
                 <div className="match-create-form">
+                  {match.gameId === "checkers" && (
+                    <fieldset className="checkers-variant-options">
+                      <legend>Checkers rules</legend>
+                      <div className="checkers-variant-list">
+                        {CHECKERS_VARIANTS.map((variant) => (
+                          <label className="checkers-variant-option" key={variant.rulesVersion}>
+                            <input
+                              type="radio"
+                              name="checkers-rules"
+                              value={variant.rulesVersion}
+                              checked={match.onlineDialog?.rulesVersion === variant.rulesVersion}
+                              onChange={() =>
+                                controller.updateOnlineForm("rulesVersion", variant.rulesVersion)
+                              }
+                            />
+                            <span>
+                              <strong>{variant.name}</strong>
+                              <small>{variant.summary}</small>
+                            </span>
+                          </label>
+                        ))}
+                      </div>
+                    </fieldset>
+                  )}
                   <fieldset className="visibility-options create-visibility-options">
                     <legend>Who can join?</legend>
                     {(
@@ -1368,9 +1415,7 @@ export default function MatchApp({
                     )}
                   {!optionsExpanded && (
                     <p className="match-setup-summary">
-                      {match.onlineDialog.seriesTarget === 1
-                        ? "One game"
-                        : `First to win ${match.onlineDialog.seriesTarget}`}
+                      {seriesFormatLabel(match.onlineDialog.seriesTarget)}
                     </p>
                   )}
                   <button
@@ -1384,7 +1429,7 @@ export default function MatchApp({
                   {match.onlineDialog.optionsExpanded && (
                     <div id="match-create-options">
                       <fieldset className="series-options">
-                        <legend>Wins to take the series</legend>
+                        <legend>Series length</legend>
                         {([1, 2, 3] as const).map((target) => (
                           <label className="series-option" key={target}>
                             <input
@@ -1395,13 +1440,11 @@ export default function MatchApp({
                               onChange={() => controller.updateOnlineForm("seriesTarget", target)}
                             />
                             <span className="series-option-copy">
-                              <strong>
-                                {target === 1 ? "One game" : `First to win ${target} games`}
-                              </strong>
+                              <strong>{seriesFormatLabel(target)}</strong>
                             </span>
                           </label>
                         ))}
-                        <p className="series-options-note">Ties add no wins.</p>
+                        <p className="series-options-note">Tied games count toward the limit.</p>
                       </fieldset>
                       {match.onlineDialog.visibility === "public" && (
                         <fieldset className="series-options matchmaking-preference">

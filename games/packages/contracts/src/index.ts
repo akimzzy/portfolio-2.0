@@ -1,5 +1,16 @@
 export const PROTOCOL_VERSION = 1 as const;
 
+export type SeriesTarget = 1 | 2 | 3;
+
+/** Targets are wins needed; best-of series are capped at 2 × target − 1 games. */
+export function maxGamesForSeriesTarget(target: SeriesTarget): number {
+  return target * 2 - 1;
+}
+
+export function seriesFormatLabel(target: SeriesTarget): string {
+  return target === 1 ? "Single game" : `Best of ${maxGamesForSeriesTarget(target)}`;
+}
+
 /** Seats identify a position in a match, never an account or a token color. */
 export type PlayerSeat = "first" | "second";
 export const MATCH_REACTIONS = Object.freeze([

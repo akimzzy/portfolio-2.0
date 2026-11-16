@@ -9,10 +9,12 @@ import {
   createGameRegistry,
   invalid,
   isExactObject,
+  maxGamesForSeriesTarget,
   parseActionCommand,
   parseActionRejection,
   parseGameOutcome,
   parseStateMessage,
+  seriesFormatLabel,
 } from "@portfolio-games/contracts";
 
 const base = {
@@ -31,6 +33,11 @@ const command = () => ({
   actionId: "action-1",
   expectedRevision: 0,
   action: { choice: "left" },
+});
+
+test("series formats have finite game caps", () => {
+  assert.deepEqual([1, 2, 3].map(maxGamesForSeriesTarget), [1, 3, 5]);
+  assert.deepEqual([1, 2, 3].map(seriesFormatLabel), ["Single game", "Best of 3", "Best of 5"]);
 });
 
 test("in-house roster is stable, unique, and matches the Supabase seed", async () => {

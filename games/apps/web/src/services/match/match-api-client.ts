@@ -97,6 +97,7 @@ export class MatchApiClient {
   async createAiMatch(
     input: Readonly<{
       gameId: string;
+      rulesVersion: number;
       profileId: string;
       inHousePlayerId: string;
       seriesTarget: number;

@@ -15,7 +15,7 @@ export type AccountIdentity = Readonly<{ userId: string; username: string; acces
 export type GameHistoryEntry = Readonly<{
   completion_id: string;
   game_id: string;
-  result: "win" | "loss";
+  result: "win" | "loss" | "draw";
   opponent_name: string;
   wins: number;
   losses: number;
@@ -192,7 +192,7 @@ function parseHistoryEntry(value: unknown): GameHistoryEntry | null {
     typeof row.completion_id !== "string" ||
     !/^[A-Za-z0-9_-]{22}:[1-9][0-9]*$/.test(row.completion_id) ||
     typeof row.game_id !== "string" ||
-    (row.result !== "win" && row.result !== "loss") ||
+    (row.result !== "win" && row.result !== "loss" && row.result !== "draw") ||
     typeof row.opponent_name !== "string" ||
     typeof row.wins !== "number" ||
     typeof row.losses !== "number" ||

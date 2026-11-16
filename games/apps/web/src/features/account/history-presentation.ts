@@ -5,6 +5,10 @@ export function historyGameTitle(gameId: string): string {
   return GAME_CATALOG.find((game) => game.id === gameId)?.title ?? gameId;
 }
 
+export function historyResultLabel(result: GameHistoryEntry["result"]): string {
+  return result === "win" ? "Won" : result === "loss" ? "Lost" : "Tied";
+}
+
 export function historyFinishReasonLabel(reason: GameHistoryEntry["finish_reason"]): string | null {
   switch (reason) {
     case "timeout":

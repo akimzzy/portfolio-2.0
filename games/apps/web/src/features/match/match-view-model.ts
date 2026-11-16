@@ -2,6 +2,7 @@ import type {
   PlayerSeat,
   RuntimeTwoPlayerGame,
 } from "../../../../../packages/contracts/dist/index.js";
+import { seriesFormatLabel } from "../../../../../packages/contracts/dist/index.js";
 import type { GameDialogView, MatchViewSnapshot, OnlineDialogView } from "./match-view-store.js";
 import type { LiveMatch, OnlineMultiplayer, PendingOnlineMove } from "./match-types.js";
 import { reversiDiscColor } from "./games/reversi/presentation.js";
@@ -76,6 +77,7 @@ export function createMatchViewSnapshot(input: MatchViewModelInput): MatchViewSn
     (match.status === "waiting" || match.status === "countdown")
       ? null
       : startingPlayer;
+  const checkersStartingPlayer = effectiveGameId === "checkers" ? startingPlayer : null;
   const actionCount = fallback.ok ? fallback.value.actionCount : 0;
   const revealingWin = outcome?.kind === "win" && isRevealingWin;
   const current = outcome?.kind === "win" ? outcome.winner : nextPlayer;
@@ -155,7 +157,9 @@ export function createMatchViewSnapshot(input: MatchViewModelInput): MatchViewSn
     } else if (match.status === "completed") {
       statusText = match.seriesWinner
         ? `${playerName(match.seriesWinner)} wins the series`
-        : "Series complete";
+        : match.outcome === "series-draw"
+          ? "Series tied"
+          : "Series complete";
       boardHint = match.closedSeats?.some(Boolean)
         ? "Player left. Start a new game to play again."
         : "Choose Rematch to play again.";
@@ -199,9 +203,11 @@ export function createMatchViewSnapshot(input: MatchViewModelInput): MatchViewSn
           : startingPlayer
             ? effectiveGameId === "tic-tac-toe"
               ? `${ticTacToeMark} · ${seat === startingPlayer ? "Goes first" : "Goes second"}`
-              : seat === startingPlayer
-                ? "Goes first"
-                : "Goes second"
+              : effectiveGameId === "checkers"
+                ? `${seat === checkersStartingPlayer ? "Red" : "White"} · ${seat === checkersStartingPlayer ? "Goes first" : "Goes second"}`
+                : seat === startingPlayer
+                  ? "Goes first"
+                  : "Goes second"
             : seat === "first"
               ? "Player 1"
               : "Player 2"
@@ -212,9 +218,11 @@ export function createMatchViewSnapshot(input: MatchViewModelInput): MatchViewSn
             : "Offline"
       : effectiveGameId === "tic-tac-toe"
         ? `${ticTacToeMark} · ${seat === startingPlayer ? "Goes first" : "Goes second"}`
-        : seat === startingPlayer
-          ? "Goes first"
-          : "Goes second";
+        : effectiveGameId === "checkers"
+          ? `${seat === checkersStartingPlayer ? "Red" : "White"} · ${seat === checkersStartingPlayer ? "Goes first" : "Goes second"}`
+          : seat === startingPlayer
+            ? "Goes first"
+            : "Goes second";
     const pendingWin = revealingWin && pendingWinSeat === seat ? 1 : 0;
     return {
       seat,
@@ -244,7 +252,9 @@ export function createMatchViewSnapshot(input: MatchViewModelInput): MatchViewSn
   const detailStatus = isOnline
     ? match.status === "active" && activeTurn
       ? `${playerName(activeTurn)} to move`
-      : (statusCopy[match.status] ?? "Connecting")
+      : match.status === "completed" && match.outcome === "series-draw"
+        ? "Series tied"
+        : (statusCopy[match.status] ?? "Connecting")
     : outcome?.kind === "draw"
       ? "Tied"
       : outcome?.kind === "win"
@@ -262,6 +272,7 @@ export function createMatchViewSnapshot(input: MatchViewModelInput): MatchViewSn
     aiThinkDelayMs: aiPresentation.delayMs,
     gameId: effectiveGameId,
     rulesVersion,
+    gameNumber: visibleGameNumber,
     gameState,
     actionCount,
     nextPlayer,
@@ -296,15 +307,11 @@ export function createMatchViewSnapshot(input: MatchViewModelInput): MatchViewSn
     activityNotice,
     hasUnreadActivity,
     roundLabel: isOnline
-      ? `Game ${visibleGameNumber} · ${target === 1 ? "One game" : `First to ${target}`}`
+      ? `Game ${visibleGameNumber} · ${seriesFormatLabel(target ?? 1)}`
       : `Game ${round} · ${actionCount} ${actionCount === 1 ? "move" : "moves"}`,
     players,
     detail: {
-      format: isOnline
-        ? target === 1
-          ? "One game"
-          : `First to win ${target} games`
-        : "Local practice",
+      format: isOnline ? seriesFormatLabel(target ?? 1) : "Local practice",
       game: `Game ${visibleGameNumber}`,
       room: isOnline
         ? match.visibility === "invite"

@@ -35,6 +35,7 @@ export type OnlineDialogView = {
   showRules: boolean;
   rulesSeries: string;
   rulesDetails: string;
+  rulesVersion: number;
   seriesTarget: 1 | 2 | 3;
   matchAnySeries: boolean;
   visibility: "public" | "invite";
@@ -56,6 +57,7 @@ export type MatchViewSnapshot = {
   aiThinkDelayMs: number;
   gameId: string;
   rulesVersion: number;
+  gameNumber: number;
   gameState: unknown;
   actionCount: number;
   nextPlayer: PlayerSeat | null;
@@ -111,6 +113,7 @@ const EMPTY_SNAPSHOT: MatchViewSnapshot = {
   aiThinkDelayMs: 0,
   gameId: "connect-four",
   rulesVersion: 2,
+  gameNumber: 1,
   gameState: null,
   actionCount: 0,
   nextPlayer: "first",

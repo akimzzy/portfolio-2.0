@@ -16,6 +16,11 @@ import {
   parseTicTacToeState,
   RULES_VERSION as TIC_TAC_TOE_RULES_VERSION,
 } from "@portfolio-games/tic-tac-toe";
+import {
+  legalMoves as legalCheckersMoves,
+  parseCheckersState,
+  RULES_VERSION as CHECKERS_RULES_VERSION,
+} from "@portfolio-games/checkers";
 
 const gamesRoot = path.resolve(import.meta.dirname, "../../..");
 const origin = "http://localhost:4178";
@@ -668,6 +673,90 @@ test(
     assert.equal(response.match.seatKinds[0], "ai");
     assert.equal(response.match.seatKinds[1], "human");
     assert.equal(parseTicTacToeState(response.match.state).ok, true);
+  },
+);
+
+test(
+  "Checkers is registered end to end and its server AI returns a legal reply",
+  { timeout: 30_000 },
+  async (t) => {
+    const port = await unusedPort();
+    const persistencePath = await mkdtemp(path.join(os.tmpdir(), "portfolio-games-checkers-"));
+    let worker;
+    const clients = [];
+    t.after(async () => {
+      clients.forEach((client) => client.close());
+      if (worker) await stopWorker(worker.process);
+      await rm(persistencePath, { recursive: true, force: true });
+    });
+
+    worker = await startWorker(port, persistencePath);
+    const created = await api(worker.baseUrl, "/v1/matches/ai", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        gameId: "checkers",
+        rulesVersion: CHECKERS_RULES_VERSION,
+        profileId: "easy",
+        seriesTarget: 1,
+        displayName: "Test Player",
+      }),
+    });
+    assert.equal(created.response.status, 201);
+    assert.equal(created.body.gameId, "checkers");
+    assert.equal(created.body.seat, "second");
+
+    const client = socketClient(worker.baseUrl, created.body.matchId, created.body.seatToken);
+    clients.push(client);
+    await client.openAndAuthenticate();
+    const activeEvent = await client.waitFor(
+      (payload) =>
+        payload.type === "match" &&
+        payload.match.status === "active" &&
+        payload.match.state !== null,
+    );
+    let active = activeEvent.match;
+    if (active.awaitingTurnReceipt?.seat === "second") {
+      client.send({ type: "turn-received", revision: active.revision });
+      active = (
+        await client.waitFor(
+          (payload) =>
+            payload.type === "match" &&
+            payload.match.status === "active" &&
+            payload.match.turnDeadline !== null,
+        )
+      ).match;
+    }
+
+    const initial = parseCheckersState(active.state);
+    assert.equal(initial.ok, true, initial.ok ? "" : JSON.stringify(initial.issues));
+    if (!initial.ok) return;
+    assert.equal(initial.value.nextPlayer, created.body.seat);
+    assert.ok(initial.value.moves.length <= 1);
+    const selected = legalCheckersMoves(initial.value)[0];
+    assert.ok(selected);
+
+    const accepted = client.waitFor(
+      (payload) => payload.acceptedActionId === "checkers-human-move",
+    );
+    client.send({
+      protocolVersion: 1,
+      type: "submit-action",
+      gameId: "checkers",
+      rulesVersion: CHECKERS_RULES_VERSION,
+      matchId: created.body.matchId,
+      actionId: "checkers-human-move",
+      expectedRevision: active.revision,
+      action: { type: "move-piece", from: selected.from, path: selected.path },
+    });
+    const response = await accepted;
+    assert.equal(response.match.gameId, "checkers");
+    assert.equal(response.match.status, "active");
+    assert.ok(response.match.state.moves.length >= initial.value.moves.length + 2);
+    assert.ok(response.match.state.moves.length <= initial.value.moves.length + 15);
+    assert.equal(parseCheckersState(response.match.state).ok, true);
+    assert.equal(response.match.seatKinds[0], "ai");
+    assert.equal(response.match.seatKinds[1], "human");
   },
 );
 

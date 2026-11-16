@@ -192,6 +192,7 @@ export class MatchSessionCoordinator {
   async createAiRoom(
     input: Readonly<{
       gameId: string;
+      rulesVersion: number;
       profileId: string;
       inHousePlayerId: string;
       seriesTarget: number;

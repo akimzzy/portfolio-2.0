@@ -12,9 +12,16 @@ import { showDialogWithoutActionFocus } from "../../shared/show-dialog";
 import { Button } from "../../components/Button";
 import { GameHowToPlay, type GameId } from "../match/GameHowToPlay";
 import { LeaderboardPanel } from "./LeaderboardPanel";
+import { checkersVariantForVersion } from "@portfolio-games/checkers";
+import { seriesFormatLabel } from "../../../../../packages/contracts/dist/index.js";
 
 function seriesLabel(target: number): string {
-  return target === 1 ? "One game" : `First to win ${target}`;
+  return target === 1 || target === 2 || target === 3 ? seriesFormatLabel(target) : "Series";
+}
+
+function matchSettingsLabel(gameId: string, rulesVersion: number, target: number): string {
+  const variant = gameId === "checkers" ? checkersVariantForVersion(rulesVersion)?.name : null;
+  return [variant, seriesLabel(target)].filter(Boolean).join(" · ");
 }
 
 export default function LobbyApp({ controller }: { controller: GameController }) {
@@ -267,7 +274,8 @@ export default function LobbyApp({ controller }: { controller: GameController })
                 <div className="lobby-match-copy">
                   <strong>{match.displayName}</strong>
                   <span>
-                    {game.title} · {seriesLabel(match.seriesTarget)}
+                    {game.title} ·{" "}
+                    {matchSettingsLabel(game.id, match.rulesVersion, match.seriesTarget)}
                   </span>
                 </div>
                 <Button
@@ -290,7 +298,11 @@ export default function LobbyApp({ controller }: { controller: GameController })
                   <strong>{opponent.displayName}</strong>
                   <span>
                     {GAME_CATALOG.find((game) => game.id === opponent.gameId)?.title ?? "Game"} ·{" "}
-                    {seriesLabel(opponent.seriesTarget)}
+                    {matchSettingsLabel(
+                      opponent.gameId,
+                      opponent.rulesVersion,
+                      opponent.seriesTarget,
+                    )}
                   </span>
                 </div>
                 <Button
@@ -306,6 +318,7 @@ export default function LobbyApp({ controller }: { controller: GameController })
                       opponent.inHousePlayerId,
                       opponent.displayName,
                       opponent.seriesTarget,
+                      opponent.rulesVersion,
                     );
                     lobbyClient.consumeOpponentOffer(opponent.offerId);
                   }}

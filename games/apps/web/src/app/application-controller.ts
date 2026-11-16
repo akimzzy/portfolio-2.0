@@ -3,7 +3,10 @@ import type {
   RuntimeGameStateInfo,
   RuntimeTwoPlayerGame,
 } from "../../../../packages/contracts/dist/index.js";
-import { normalizeQuickMessage } from "../../../../packages/contracts/dist/index.js";
+import {
+  normalizeQuickMessage,
+  seriesFormatLabel,
+} from "../../../../packages/contracts/dist/index.js";
 import type { MatchReactionId, PlayerSeat } from "../../../../packages/contracts/dist/index.js";
 import type { LobbyMatch } from "../features/lobby/lobby-client";
 import { publishMatchView } from "../features/match/match-view-store.js";
@@ -45,6 +48,7 @@ type OnlineForm = {
   visibility: "public" | "invite";
   optionsExpanded: boolean;
   invitedFriendshipIds: string[];
+  rulesVersion: number;
 };
 type Multiplayer = OnlineMultiplayer;
 type CreateRoomInput = Readonly<{
@@ -54,6 +58,7 @@ type CreateRoomInput = Readonly<{
   displayName: string;
   useAccountIdentity: boolean;
   invitedFriendshipIds: string[];
+  rulesVersion: number;
 }>;
 type GameDialogOptions = Pick<GameDialogView, "mode" | "title" | "primaryLabel"> &
   Partial<Omit<GameDialogView, "mode" | "title" | "primaryLabel">>;
@@ -182,6 +187,7 @@ export function createGameController() {
     visibility: "public",
     optionsExpanded: false,
     invitedFriendshipIds: [],
+    rulesVersion: clientGames.get(currentGameId)!.rulesVersion,
   };
   let opponentIntent: {
     gameId: string;
@@ -189,6 +195,7 @@ export function createGameController() {
     inHousePlayerId: string;
     opponentName: string;
     seriesTarget: 1 | 2 | 3;
+    rulesVersion: number;
   } | null = null;
   let activeMatchNotice = "";
   let checkingSavedMatch = false;
@@ -1234,7 +1241,7 @@ export function createGameController() {
     const changedStatus = match.status !== previousStatus;
     if (match.status === "completed" && (changedStatus || changedOutcome)) {
       accountSession.markGameHistoryStale();
-      if (!multiplayer.accountLinked && match.seriesWinner) {
+      if (!multiplayer.accountLinked && (match.seriesWinner || match.outcome === "series-draw")) {
         const ownIndex = multiplayer.seat === "first" ? 0 : 1;
         const rawOpponentName = match.playerNames?.[ownIndex === 0 ? 1 : 0];
         const opponentName =
@@ -1265,7 +1272,12 @@ export function createGameController() {
           completion_id: `${match.matchId}:${match.seriesNumber ?? 1}`,
           game_id: match.gameId,
           rules_version: match.rulesVersion,
-          result: match.seriesWinner === multiplayer.seat ? "win" : "loss",
+          result:
+            match.outcome === "series-draw"
+              ? "draw"
+              : match.seriesWinner === multiplayer.seat
+                ? "win"
+                : "loss",
           opponent_name: opponentName,
           wins: ownIndex === 0 ? match.wins.first : match.wins.second,
           losses: ownIndex === 0 ? match.wins.second : match.wins.first,
@@ -1497,6 +1509,7 @@ export function createGameController() {
     displayName,
     useAccountIdentity,
     invitedFriendshipIds,
+    rulesVersion,
   }: CreateRoomInput) {
     updateOnlineDialog({ busy: true, error: "Creating your game…" });
     try {
@@ -1504,7 +1517,7 @@ export function createGameController() {
         visibility === "public"
           ? await matchCoordinator.quickMatch({
               gameId: currentGameId,
-              rulesVersion: currentGame().rulesVersion,
+              rulesVersion,
               seriesTarget,
               matchAnySeries,
               displayName,
@@ -1512,7 +1525,7 @@ export function createGameController() {
             })
           : await matchCoordinator.createRoom({
               gameId: currentGameId,
-              rulesVersion: currentGame().rulesVersion,
+              rulesVersion,
               visibility,
               seriesTarget,
               displayName,
@@ -1638,6 +1651,7 @@ export function createGameController() {
     inHousePlayerId: string,
     opponentName: string,
     seriesTarget: 1 | 2 | 3,
+    rulesVersion: number,
     displayName: string,
     useAccountIdentity: boolean,
   ) {
@@ -1650,12 +1664,13 @@ export function createGameController() {
     }
 
     currentGameId = gameId;
-    state = createCurrentState("first");
+    state = createCurrentState("first", rulesVersion);
     round = 1;
     wins = { first: 0, second: 0 };
     try {
       const creation = await matchCoordinator.createAiRoom({
         gameId: currentGameId,
+        rulesVersion,
         profileId,
         inHousePlayerId,
         seriesTarget,
@@ -1728,7 +1743,7 @@ export function createGameController() {
         rulesDetails: "",
       };
 
-    const series = seriesTarget === 1 ? "One game" : `First to win ${seriesTarget} games`;
+    const series = seriesFormatLabel(seriesTarget);
     const rawTurnSeconds = match?.turnSeconds;
     const turnSeconds =
       typeof rawTurnSeconds === "number" && Number.isSafeInteger(rawTurnSeconds)
@@ -1743,11 +1758,18 @@ export function createGameController() {
       };
     const timeoutRule =
       match.turnTimeoutForfeitsGame === false ? "Timeouts end a turn" : "Timeout loses this game";
-    const tieRule = match.tiesAwardNoPoint === false ? "Ties add a point" : "Ties add no points";
+    const tieRule =
+      match.tiesAwardNoPoint === false
+        ? "Ties add one win and count toward the series limit"
+        : "Ties add no win and count toward the series limit";
     const gameRules =
       game?.id === "reversi"
         ? "Place a disc to trap and flip opposing discs. Most discs wins. If you have no legal move, you pass."
-        : game?.description;
+        : game?.id === "checkers"
+          ? match.rulesVersion === 2
+            ? "International draughts · 10×10 · flying kings · maximum captures."
+            : "English / American · 8×8 · short kings · any legal capture route."
+          : game?.description;
     const matchRules = `${turnSeconds} sec per turn · ${timeoutRule} · ${tieRule}`;
     return {
       title: `Join ${game?.title ?? "game"}`,
@@ -2031,6 +2053,7 @@ export function createGameController() {
       visibility: "public",
       optionsExpanded: false,
       invitedFriendshipIds: [],
+      rulesVersion: currentGame().rulesVersion,
       joinAsGuest: accountSession.getIdentity() === null,
     };
     clearPlayerNameError();
@@ -2050,7 +2073,8 @@ export function createGameController() {
       | "matchAnySeries"
       | "visibility"
       | "optionsExpanded"
-      | "invitedFriendshipIds",
+      | "invitedFriendshipIds"
+      | "rulesVersion",
     value: string | number | boolean | string[],
   ) {
     if (field === "name" && typeof value === "string") onlineForm.name = value.slice(0, 24);
@@ -2068,7 +2092,14 @@ export function createGameController() {
       onlineForm.optionsExpanded = value;
     else if (field === "invitedFriendshipIds" && Array.isArray(value))
       onlineForm.invitedFriendshipIds = [...new Set(value)].slice(0, 10);
-    else return;
+    else if (
+      field === "rulesVersion" &&
+      typeof value === "number" &&
+      currentGame().supportsRulesVersion(value)
+    ) {
+      onlineForm.rulesVersion = value;
+      state = createCurrentState("first", value);
+    } else return;
     if (onlineDialogView) updateOnlineDialog({ ...onlineForm, nameInvalid: false, error: "" });
   }
 
@@ -2191,15 +2222,28 @@ export function createGameController() {
     inHousePlayerId: string,
     opponentName: string,
     seriesTarget: 1 | 2 | 3,
+    rulesVersion?: number,
   ) {
     if (!clientGames.get(gameId) || !isRegisteredOpponentProfile(gameId, profileId)) return;
+    const selectedRulesVersion =
+      rulesVersion !== undefined && clientGames.get(gameId)?.supportsRulesVersion(rulesVersion)
+        ? rulesVersion
+        : clientGames.get(gameId)!.rulesVersion;
     appStore.update({ lobbyError: "" });
-    opponentIntent = { gameId, profileId, inHousePlayerId, opponentName, seriesTarget };
+    opponentIntent = {
+      gameId,
+      profileId,
+      inHousePlayerId,
+      opponentName,
+      seriesTarget,
+      rulesVersion: selectedRulesVersion,
+    };
     returnToGamesAfterCreateDialog = appStore.getSnapshot().screen === "lobby";
     currentGameId = gameId;
     onlineForm = {
       ...onlineForm,
       seriesTarget,
+      rulesVersion: selectedRulesVersion,
       visibility: "public",
       optionsExpanded: false,
       invitedFriendshipIds: [],
@@ -2212,8 +2256,12 @@ export function createGameController() {
       title: `Play ${currentGame().title}`,
       description: `Against ${opponentName}`,
       showRules: true,
-      rulesSeries: seriesTarget === 1 ? "One game" : `First to win ${seriesTarget}`,
-      rulesDetails: "Ties add no wins.",
+      rulesSeries: seriesFormatLabel(seriesTarget),
+      rulesDetails:
+        gameId === "checkers"
+          ? `${selectedRulesVersion === 2 ? "International draughts · 10×10 · flying kings · maximum captures" : "English / American · 8×8 · short kings · any legal capture route"}. Tied games count toward the series limit.`
+          : "Tied games count toward the series limit.",
+      rulesVersion: selectedRulesVersion,
       closeLabel: "Close",
     });
   }
@@ -2329,6 +2377,7 @@ export function createGameController() {
         visibility: onlineForm.visibility,
         seriesTarget: onlineForm.seriesTarget,
         matchAnySeries: onlineForm.matchAnySeries,
+        rulesVersion: onlineForm.rulesVersion,
         displayName,
         useAccountIdentity,
         invitedFriendshipIds: useAccountIdentity ? onlineForm.invitedFriendshipIds : [],
@@ -2366,6 +2415,7 @@ export function createGameController() {
         intent.inHousePlayerId,
         intent.opponentName,
         intent.seriesTarget,
+        intent.rulesVersion,
         chosenDisplayName(useAccountIdentity),
         useAccountIdentity,
       );
@@ -2492,6 +2542,7 @@ export function createGameController() {
       showRules: false,
       rulesSeries: "",
       rulesDetails: "",
+      rulesVersion: onlineForm.rulesVersion,
       seriesTarget: onlineForm.seriesTarget,
       matchAnySeries: onlineForm.matchAnySeries,
       visibility: onlineForm.visibility,
@@ -2676,9 +2727,20 @@ export function createGameController() {
     showGameDialog(
       makeGameDialog({
         mode: "online-complete",
-        mark: winner === "first" ? "1" : winner === "second" ? "2" : "✓",
+        mark:
+          winner === "first"
+            ? "1"
+            : winner === "second"
+              ? "2"
+              : match.outcome === "series-draw"
+                ? "T"
+                : "✓",
         markTone: winner ?? "draw",
-        title: winner ? `${playerName(winner)} wins the series!` : "Series complete",
+        title: winner
+          ? `${playerName(winner)} wins the series!`
+          : match.outcome === "series-draw"
+            ? "Series tied"
+            : "Series complete",
         description,
         primaryLabel: opponentLeft
           ? "Rematch unavailable"
@@ -2756,6 +2818,7 @@ export function createGameController() {
       visibility: expiredMatch.visibility,
       seriesTarget: expiredMatch.seriesTarget,
       matchAnySeries: onlineForm.matchAnySeries,
+      rulesVersion: expiredMatch.rulesVersion,
       displayName: multiplayer.displayName ?? expiredMatch.playerNames?.[0] ?? "",
       useAccountIdentity: multiplayer.accountLinked,
       invitedFriendshipIds: [],
@@ -2768,6 +2831,7 @@ export function createGameController() {
       name: roomSettings.displayName,
       visibility: roomSettings.visibility,
       seriesTarget: roomSettings.seriesTarget,
+      rulesVersion: roomSettings.rulesVersion,
     };
     presentOnlineDialog({
       mode: "create",
@@ -2777,6 +2841,7 @@ export function createGameController() {
       name: roomSettings.displayName,
       visibility: roomSettings.visibility,
       seriesTarget: roomSettings.seriesTarget,
+      rulesVersion: roomSettings.rulesVersion,
     });
     await createOnlineMatch(roomSettings);
   }

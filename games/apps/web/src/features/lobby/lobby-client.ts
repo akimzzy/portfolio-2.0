@@ -1,4 +1,4 @@
-import { GAME_CATALOG } from "../../games/registry";
+import { clientGames, GAME_CATALOG } from "../../games/registry";
 import { IN_HOUSE_PLAYERS } from "@portfolio-games/contracts";
 import { opponentProfilesForLobby } from "../../games/opponents";
 import {
@@ -13,6 +13,7 @@ export type LobbyGame = (typeof GAME_CATALOG)[number];
 export type LobbyMatch = {
   matchId: string;
   gameId: string;
+  rulesVersion: number;
   displayName: string;
   seriesTarget: 1 | 2 | 3;
   createdAt: number;
@@ -22,6 +23,7 @@ export type LobbyOpponentOffer = Readonly<{
   offerId: string;
   inHousePlayerId: string;
   gameId: string;
+  rulesVersion: number;
   profileId: string;
   displayName: string;
   seriesTarget: 1 | 2 | 3;
@@ -67,11 +69,15 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isLobbyMatch(value: unknown): value is LobbyMatch {
   if (!isRecord(value)) return false;
+  const game = typeof value.gameId === "string" ? clientGames.get(value.gameId) : null;
   return (
     typeof value.matchId === "string" &&
     /^[A-Za-z0-9_-]{22}$/.test(value.matchId) &&
     typeof value.gameId === "string" &&
     GAME_CATALOG.some((game) => game.id === value.gameId) &&
+    game !== null &&
+    typeof value.rulesVersion === "number" &&
+    game.supportsRulesVersion(value.rulesVersion) &&
     typeof value.displayName === "string" &&
     value.displayName.trim().length > 0 &&
     Array.from(value.displayName).length <= 24 &&
@@ -263,11 +269,18 @@ export class LobbyClient {
       (_, index) => {
         const profile = this.nextProfile(profiles);
         const identity = availablePlayers[index]!;
+        const game = clientGames.get(profile.gameId);
+        const rulesVersions = game?.supportedRulesVersions ?? [];
+        const rulesVersion =
+          rulesVersions[Math.floor(Math.random() * Math.max(1, rulesVersions.length))] ??
+          game?.rulesVersion ??
+          1;
         const displayName = identity.displayName;
         return {
           offerId: `${now.toString(36)}-${Math.random().toString(36).slice(2, 9)}-${index}`,
           inHousePlayerId: identity.playerId,
           gameId: profile.gameId,
+          rulesVersion,
           profileId: identity.difficulty,
           displayName,
           seriesTarget: ([1, 2, 3] as const)[Math.floor(Math.random() * 3)]!,
@@ -363,10 +376,19 @@ export class LobbyClient {
             const identity = IN_HOUSE_PLAYERS.find(
               (player) => player.playerId === offer.inHousePlayerId,
             );
-            if (!identity || !GAME_CATALOG.some((game) => game.id === offer.gameId)) return [];
+            const game = clientGames.get(offer.gameId);
+            const rulesVersion = offer.rulesVersion ?? game?.rulesVersion;
+            if (
+              !identity ||
+              !game ||
+              typeof rulesVersion !== "number" ||
+              !game.supportsRulesVersion(rulesVersion)
+            )
+              return [];
             return [
               {
                 ...offer,
+                rulesVersion,
                 profileId: identity.difficulty,
                 displayName: identity.displayName,
               },

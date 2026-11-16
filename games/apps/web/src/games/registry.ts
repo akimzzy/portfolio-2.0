@@ -2,12 +2,14 @@ import { createGameRegistry } from "@portfolio-games/contracts";
 import { connectFourRuntime } from "@portfolio-games/connect-four";
 import { reversiRuntime } from "@portfolio-games/reversi";
 import { ticTacToeRuntime } from "@portfolio-games/tic-tac-toe";
+import { checkersRuntime } from "@portfolio-games/checkers";
 
 /** Browser-safe game rules registry; React renderers are registered separately. */
 export const clientGames = createGameRegistry([
   connectFourRuntime,
   reversiRuntime,
   ticTacToeRuntime,
+  checkersRuntime,
 ]);
 
 export const GAME_CATALOG = Object.freeze(

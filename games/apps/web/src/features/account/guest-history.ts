@@ -2,7 +2,7 @@ export type GuestGameHistoryEntry = Readonly<{
   completion_id: string;
   game_id: string;
   rules_version: number;
-  result: "win" | "loss";
+  result: "win" | "loss" | "draw";
   opponent_name: string;
   wins: number;
   losses: number;
@@ -30,7 +30,7 @@ function parseEntry(value: unknown): GuestGameHistoryEntry | null {
     !GAME_ID_PATTERN.test(value.game_id) ||
     !Number.isSafeInteger(value.rules_version) ||
     Number(value.rules_version) < 1 ||
-    (value.result !== "win" && value.result !== "loss") ||
+    (value.result !== "win" && value.result !== "loss" && value.result !== "draw") ||
     typeof value.opponent_name !== "string" ||
     value.opponent_name.length < 1 ||
     value.opponent_name.length > 24 ||

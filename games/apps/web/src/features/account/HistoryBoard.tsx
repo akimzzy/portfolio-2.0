@@ -5,6 +5,7 @@ import { BOARD_SIZE as TIC_TAC_TOE_SIZE } from "@portfolio-games/tic-tac-toe";
 import { countReversiDiscs, reversiDiscColor } from "../match/games/reversi/presentation.js";
 import { TicTacToeMark } from "../match/games/tic-tac-toe/TicTacToeMark.js";
 import { ticTacToeSymbol } from "../match/games/tic-tac-toe/presentation.js";
+import { CheckersCrown } from "../match/games/checkers/CheckersCrown.js";
 
 type BoardSnapshot = Readonly<{
   board: readonly (readonly (PlayerSeat | null)[])[];
@@ -129,6 +130,100 @@ function TicTacToeHistoryBoard({ snapshot }: { snapshot: BoardSnapshot }) {
   );
 }
 
+type CheckersSnapshot = Readonly<{
+  board: readonly (readonly (Readonly<{ seat: PlayerSeat; king: boolean }> | null)[])[];
+  startingPlayer: PlayerSeat;
+}>;
+
+function parseCheckersSnapshot(value: unknown): CheckersSnapshot | null {
+  if (!value || typeof value !== "object") return null;
+  const record = value as Record<string, unknown>;
+  const board = record.board;
+  if (
+    (record.startingPlayer !== "first" && record.startingPlayer !== "second") ||
+    !Array.isArray(board) ||
+    (board.length !== 8 && board.length !== 10) ||
+    !board.every(
+      (row) =>
+        Array.isArray(row) &&
+        row.length === board.length &&
+        row.every(
+          (cell) =>
+            cell === null ||
+            (cell !== null &&
+              typeof cell === "object" &&
+              ((cell as Record<string, unknown>).seat === "first" ||
+                (cell as Record<string, unknown>).seat === "second") &&
+              typeof (cell as Record<string, unknown>).king === "boolean"),
+        ),
+    )
+  )
+    return null;
+  return {
+    board: board as CheckersSnapshot["board"],
+    startingPlayer: record.startingPlayer,
+  };
+}
+
+function CheckersHistoryBoard({ snapshot }: { snapshot: CheckersSnapshot }) {
+  const redCount = snapshot.board
+    .flat()
+    .filter((piece) => piece?.seat === snapshot.startingPlayer).length;
+  const whiteCount = snapshot.board
+    .flat()
+    .filter((piece) => piece && piece.seat !== snapshot.startingPlayer).length;
+  return (
+    <div className="checkers-board-wrap account-history-checkers-board">
+      <div className="checkers-score" aria-label={`Red ${redCount}, White ${whiteCount}`}>
+        <span>
+          <i className="checkers-score-piece is-red" aria-hidden="true" />
+          Red <strong>{redCount}</strong>
+        </span>
+        <span>
+          <i className="checkers-score-piece is-white" aria-hidden="true" />
+          White <strong>{whiteCount}</strong>
+        </span>
+      </div>
+      <div
+        className="checkers-board"
+        role="grid"
+        aria-label={`Checkers final board, ${snapshot.board.length} by ${snapshot.board.length}`}
+        style={{ gridTemplateRows: `repeat(${snapshot.board.length}, minmax(0, 1fr))` }}
+      >
+        {snapshot.board.map((row, rowIndex) => (
+          <div
+            className="checkers-row"
+            role="row"
+            key={rowIndex}
+            style={{ gridTemplateColumns: `repeat(${snapshot.board.length}, minmax(0, 1fr))` }}
+          >
+            {row.map((piece, columnIndex) => {
+              const color = piece ? (piece.seat === snapshot.startingPlayer ? "red" : "white") : "";
+              return (
+                <div
+                  className={`checkers-square${(rowIndex + columnIndex) % 2 ? " is-playable" : ""}`}
+                  role="gridcell"
+                  key={columnIndex}
+                  aria-label={`Row ${rowIndex + 1}, column ${columnIndex + 1}: ${piece ? `${color} ${piece.king ? "king" : "man"}` : "Empty"}`}
+                >
+                  {piece && (
+                    <span
+                      className={`checkers-piece is-${color}${piece.king ? " is-king" : ""}`}
+                      aria-hidden="true"
+                    >
+                      {piece.king && <CheckersCrown />}
+                    </span>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export function HistoryBoard({ gameId, finalState }: { gameId: string; finalState: unknown }) {
   if (gameId === "connect-four") {
     const snapshot = parseBoardSnapshot(finalState, ROWS, COLUMNS);
@@ -147,6 +242,14 @@ export function HistoryBoard({ gameId, finalState }: { gameId: string; finalStat
     const snapshot = parseBoardSnapshot(finalState, TIC_TAC_TOE_SIZE, TIC_TAC_TOE_SIZE);
     return snapshot ? (
       <TicTacToeHistoryBoard snapshot={snapshot} />
+    ) : (
+      <p className="account-history-message">Board data is unavailable.</p>
+    );
+  }
+  if (gameId === "checkers") {
+    const snapshot = parseCheckersSnapshot(finalState);
+    return snapshot ? (
+      <CheckersHistoryBoard snapshot={snapshot} />
     ) : (
       <p className="account-history-message">Board data is unavailable.</p>
     );

@@ -18,6 +18,7 @@ export type GameController = Readonly<{
     inHousePlayerId: string,
     opponentName: string,
     seriesTarget: 1 | 2 | 3,
+    rulesVersion?: number,
   ): void;
   joinMatch(match: LobbyMatch): void;
   resumeMatch(): void;
@@ -49,7 +50,8 @@ export type GameController = Readonly<{
       | "matchAnySeries"
       | "visibility"
       | "optionsExpanded"
-      | "invitedFriendshipIds",
+      | "invitedFriendshipIds"
+      | "rulesVersion",
     value: string | number | boolean | string[],
   ): void;
   copyInviteLink(): Promise<void>;

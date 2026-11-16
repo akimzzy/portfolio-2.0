@@ -13,6 +13,7 @@
     "@portfolio-games/connect-four": "0.1.0",
     "@portfolio-games/reversi": "0.1.0",
     "@portfolio-games/tic-tac-toe": "0.1.0",
+    "@portfolio-games/checkers": "0.1.0",
     "@portfolio-games/contracts": "0.1.0"
   }
 }

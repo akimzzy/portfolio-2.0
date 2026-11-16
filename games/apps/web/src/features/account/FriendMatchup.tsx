@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { GameHistoryDetails } from "./GameHistoryDetails";
-import { historyFinishReasonLabel, historyGameTitle } from "./history-presentation";
+import {
+  historyFinishReasonLabel,
+  historyGameTitle,
+  historyResultLabel,
+} from "./history-presentation";
 import {
   accountSession,
   type AccountSnapshot,
@@ -240,10 +244,8 @@ export function FriendMatchup({
                 return (
                   <li className="account-friend-history-item" key={entry.completion_id}>
                     <div className="account-friend-history-heading">
-                      <span
-                        className={`account-history-outcome ${entry.result === "win" ? "is-win" : "is-loss"}`}
-                      >
-                        {entry.result === "win" ? "Won" : "Lost"}
+                      <span className={`account-history-outcome is-${entry.result}`}>
+                        {historyResultLabel(entry.result)}
                       </span>
                       <strong>{historyGameTitle(entry.game_id)}</strong>
                       <time dateTime={entry.completed_at}>

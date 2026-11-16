@@ -2,10 +2,12 @@ import { createGameRegistry } from "@portfolio-games/contracts";
 import { connectFourRuntime } from "@portfolio-games/connect-four";
 import { reversiRuntime } from "@portfolio-games/reversi";
 import { ticTacToeRuntime } from "@portfolio-games/tic-tac-toe";
+import { checkersRuntime } from "@portfolio-games/checkers";
 
 /** Worker-safe rules registry. Do not add UI components or browser APIs here. */
 export const workerGames = createGameRegistry([
   connectFourRuntime,
   reversiRuntime,
   ticTacToeRuntime,
+  checkersRuntime,
 ]);

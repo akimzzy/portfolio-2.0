@@ -3,7 +3,9 @@
   "compilerOptions": {
     "noEmit": true,
     "paths": {
-      "@portfolio-games/contracts": ["./packages/contracts/src/index.ts"]
+      "@portfolio-games/contracts": ["./packages/contracts/src/index.ts"],
+      "@portfolio-games/checkers": ["./packages/checkers/src/index.ts"],
+      "@portfolio-games/checkers/*": ["./packages/checkers/src/*.ts"]
     }
   },
   "include": ["packages/*/src/**/*.ts"]

@@ -23,6 +23,8 @@ import {
   TIC_TAC_TOE_AI_ENGINE_VERSION,
 } from "@portfolio-games/tic-tac-toe/ai";
 import { isTicTacToeDifficulty } from "@portfolio-games/tic-tac-toe/opponents";
+import { chooseCheckersMove, CHECKERS_AI_ENGINE_VERSION } from "@portfolio-games/checkers/ai";
+import { isCheckersDifficulty } from "@portfolio-games/checkers/opponents";
 
 export type WorkerOpponentProvider = Readonly<{
   gameId: string;
@@ -126,6 +128,32 @@ const providers: readonly WorkerOpponentProvider[] = Object.freeze([
         seed,
       );
       return action;
+    },
+  }),
+  Object.freeze({
+    gameId: "checkers",
+    currentEngineVersion: CHECKERS_AI_ENGINE_VERSION,
+    defaultProfileId: "medium",
+    supportsEngineVersion: (engineVersion: number) => engineVersion === CHECKERS_AI_ENGINE_VERSION,
+    supportsProfile: isCheckersDifficulty,
+    profileEngineVersion(profileId: string) {
+      return isCheckersDifficulty(profileId) ? CHECKERS_AI_ENGINE_VERSION : null;
+    },
+    chooseAction(
+      state: unknown,
+      seat: PlayerSeat,
+      profileId: string,
+      seed: number,
+      engineVersion: number,
+    ) {
+      if (engineVersion !== CHECKERS_AI_ENGINE_VERSION || !isCheckersDifficulty(profileId))
+        throw new RangeError("Unsupported Checkers opponent profile.");
+      return chooseCheckersMove(
+        state as import("@portfolio-games/checkers").CheckersState,
+        seat,
+        profileId,
+        seed,
+      );
     },
   }),
 ]);

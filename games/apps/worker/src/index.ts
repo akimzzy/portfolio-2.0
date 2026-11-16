@@ -3,6 +3,7 @@ import {
   inHouseDifficultyForPlayer,
   invalid,
   isMatchReactionId,
+  maxGamesForSeriesTarget,
   normalizeQuickMessage,
   parseActionCommand,
 } from "@portfolio-games/contracts";
@@ -308,9 +309,10 @@ function roundHistoryResult(match: Match, outcome: string): RoundHistory | null 
 }
 
 function seriesResultPayload(match: Match): Record<string, unknown> | null {
+  const isDraw = match.outcome === "series-draw";
   if (
     match.status !== "completed" ||
-    !match.seriesWinner ||
+    (!match.seriesWinner && !isDraw) ||
     !match.seriesCompletedAt ||
     !match.seats[0] ||
     !match.seats[1]
@@ -339,7 +341,7 @@ function seriesResultPayload(match: Match): Record<string, unknown> | null {
       opponent_id: opponentId,
       display_name: normalizeDisplayName(seat!.displayName, match.id, index),
       seat: isFirst ? "first" : "second",
-      result: index === winnerIndex ? "win" : "loss",
+      result: isDraw ? "draw" : index === winnerIndex ? "win" : "loss",
       wins: isFirst ? match.wins.first : match.wins.second,
       losses: isFirst ? match.wins.second : match.wins.first,
     };
@@ -350,6 +352,7 @@ function seriesResultPayload(match: Match): Record<string, unknown> | null {
     game_id: match.gameId,
     rules_version: match.rulesVersion,
     visibility: match.visibility,
+    series_result: isDraw ? "draw" : "decided",
     series_number: match.seriesNumber,
     series_target: match.seriesTarget,
     finish_reason: finishReason,
@@ -601,11 +604,16 @@ function expiredStatus(match: Match): boolean {
 function otherSeat(seat: PlayerSeat): PlayerSeat {
   return seat === "first" ? "second" : "first";
 }
+function isRematchableSeries(match: Pick<Match, "status" | "seriesWinner" | "outcome">): boolean {
+  return (
+    match.status === "completed" && (match.seriesWinner !== null || match.outcome === "series-draw")
+  );
+}
 function aiRematchLimit(seed: number): number {
   return 1 + (seed % 3);
 }
 function outcomeWinner(outcome: string): PlayerSeat | null {
-  if (outcome === "draw") return null;
+  if (outcome === "draw" || outcome === "series-draw") return null;
   if (outcome.startsWith("win-"))
     return outcome.endsWith("first") ? "first" : outcome.endsWith("second") ? "second" : null;
   if (outcome.endsWith("-first")) return "second";
@@ -765,6 +773,26 @@ function normalizeMatch(match: Match): Match {
           : now
         : null,
   };
+  // Close legacy tied series at their new game cap instead of scheduling another game.
+  if (
+    normalized.status === "between-games" &&
+    normalized.gameNumber >= maxGamesForSeriesTarget(target)
+  ) {
+    const leader =
+      normalized.wins.first === normalized.wins.second
+        ? null
+        : normalized.wins.first > normalized.wins.second
+          ? "first"
+          : "second";
+    normalized.status = "completed";
+    normalized.seriesWinner = leader;
+    normalized.outcome = leader ? "series-decided-on-wins" : "series-draw";
+    normalized.seriesCompletedAt ??= now;
+    normalized.retentionDeadline ??= now + TERMINAL_MATCH_RETENTION_MS;
+    normalized.nextGameDeadline = null;
+    normalized.nextReady = [false, false];
+    normalized.rematchReady = [false, false];
+  }
   normalized.countdownAt = Number.isFinite(normalized.countdownAt) ? normalized.countdownAt : null;
   normalized.turnDeadline = Number.isFinite(normalized.turnDeadline)
     ? normalized.turnDeadline
@@ -847,6 +875,11 @@ function normalizeMatch(match: Match): Match {
 }
 function timerStateNeedsPersistence(original: Match, normalized: Match): boolean {
   const fields = [
+    "status",
+    "outcome",
+    "seriesWinner",
+    "seriesCompletedAt",
+    "retentionDeadline",
     "aiFallbackAt",
     "countdownAt",
     "turnDeadline",
@@ -1122,6 +1155,9 @@ export default {
       const game = workerGames.get(gameId);
       const opponentProvider = opponentProviderForGame(gameId);
       if (!game || !opponentProvider) return json({ error: "unsupported-game" }, 404, headers);
+      const rulesVersion = values.rulesVersion ?? game.rulesVersion;
+      if (typeof rulesVersion !== "number" || !game.supportsRulesVersion(rulesVersion))
+        return json({ error: "unsupported-rules-version" }, 400, headers);
       if (!opponentProvider.supportsProfile(values.profileId))
         return json({ error: "unsupported-opponent" }, 400, headers);
       const seriesTarget = values.seriesTarget;
@@ -1165,11 +1201,11 @@ export default {
         displayNameKey(housePlayer.display_name) === displayNameKey(humanName)
           ? uniqueGeneratedDisplayName(id, 1, [humanName])
           : housePlayer.display_name;
-      const policy = game.getSessionPolicy(game.rulesVersion);
+      const policy = game.getSessionPolicy(rulesVersion);
       const match: Match = {
         id,
         gameId: game.gameId,
-        rulesVersion: game.rulesVersion,
+        rulesVersion,
         visibility: "public",
         status: "waiting",
         createdAt: now,
@@ -2346,7 +2382,7 @@ export class MatchDurableObject {
       return;
     }
     if (message.type === "rematch") {
-      if (match.status !== "completed" || !match.seriesWinner || match.closedSeats.some(Boolean)) {
+      if (!isRematchableSeries(match) || match.closedSeats.some(Boolean)) {
         socket.send(JSON.stringify({ type: "match", match: snapshot(match) }));
         return;
       }
@@ -2863,18 +2899,33 @@ export class MatchDurableObject {
     match.turnReceiptStartedAt = null;
     const winner = outcomeWinner(outcome);
     if (winner) match.wins[winner] += 1;
-    match.seriesWinner = winner && match.wins[winner] >= match.seriesTarget ? winner : null;
-    match.seriesCompletedAt = match.seriesWinner ? Date.now() : null;
-    match.status = match.seriesWinner ? "completed" : "between-games";
+    const now = Date.now();
+    const targetReached = winner !== null && match.wins[winner] >= match.seriesTarget;
+    const gameLimitReached = match.gameNumber >= maxGamesForSeriesTarget(match.seriesTarget);
+    const seriesWinner = targetReached
+      ? winner
+      : gameLimitReached
+        ? match.wins.first === match.wins.second
+          ? null
+          : match.wins.first > match.wins.second
+            ? "first"
+            : "second"
+        : null;
+    const seriesDraw = gameLimitReached && seriesWinner === null;
+    match.seriesWinner = seriesWinner;
+    match.seriesCompletedAt = seriesWinner || seriesDraw ? now : null;
+    match.status = seriesWinner || seriesDraw ? "completed" : "between-games";
     match.retentionDeadline =
-      match.status === "completed" ? Date.now() + TERMINAL_MATCH_RETENTION_MS : null;
+      match.status === "completed" ? now + TERMINAL_MATCH_RETENTION_MS : null;
+    if (seriesDraw) match.outcome = "series-draw";
+    else if (gameLimitReached && !targetReached) match.outcome = "series-decided-on-wins";
     if (match.status === "completed") {
       const aiIndex = match.seats.findIndex((seat) => seat?.kind === "ai");
       if (aiIndex >= 0 && (match.aiRematchesUsed ?? 0) >= (match.aiRematchesAllowed ?? 1)) {
         match.closedSeats[aiIndex] = true;
       }
     }
-    match.nextGameDeadline = match.seriesWinner ? null : Date.now() + NEXT_GAME_TIMEOUT_MS;
+    match.nextGameDeadline = match.status === "completed" ? null : now + NEXT_GAME_TIMEOUT_MS;
     match.nextReady = [false, false];
     match.rematchReady = [false, false];
     if (match.status === "between-games") {
@@ -2998,8 +3049,7 @@ export class MatchDurableObject {
   }
 
   private async requestRematch(match: Match, seat: PlayerSeat): Promise<void> {
-    if (match.status !== "completed" || !match.seriesWinner || match.closedSeats.some(Boolean))
-      return;
+    if (!isRematchableSeries(match) || match.closedSeats.some(Boolean)) return;
     const index = seat === "first" ? 0 : 1;
     if (match.rematchReady[index]) return;
     const aiIndex = match.seats.findIndex((entry) => entry?.kind === "ai");

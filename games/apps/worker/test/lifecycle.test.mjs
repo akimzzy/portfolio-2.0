@@ -322,6 +322,32 @@ test("one expired intermission reconnect window concedes the series to the other
   assert.deepEqual(result.closedSeats, [true, false]);
 });
 
+test("leaving between games awards the series to the other player", async () => {
+  const match = makeMatch({ firstDeadline: 60_000, secondDeadline: 60_000 });
+  const socket = {
+    attachment: { authenticated: true, seat: "first" },
+    deserializeAttachment() {
+      return this.attachment;
+    },
+    serializeAttachment(value) {
+      this.attachment = structuredClone(value);
+    },
+    send() {},
+    close() {},
+  };
+  const { object, values } = makeObject(match, [socket]);
+
+  await object.webSocketMessage(socket, JSON.stringify({ type: "concede-series" }));
+
+  const result = values.get("match");
+  assert.equal(result.status, "completed");
+  assert.equal(result.outcome, "series-conceded-first");
+  assert.equal(result.seriesWinner, "second");
+  assert.deepEqual(result.wins, { first: 1, second: 0 });
+  assert.equal(result.nextGameDeadline, null);
+  assert.equal(result.closedSeats[0], true);
+});
+
 test("simultaneous intermission reconnect expiry cancels the series without a winner", async () => {
   const match = makeMatch({ firstDeadline: 5_000, secondDeadline: 5_000 });
   const { object, values, storage } = makeObject(match);
@@ -334,6 +360,86 @@ test("simultaneous intermission reconnect expiry cancels the series without a wi
   assert.deepEqual(result.closedSeats, [true, true]);
   assert.equal(result.retentionDeadline, now + 5_000 + 24 * 60 * 60_000);
   assert.equal(await storage.getAlarm(), result.retentionDeadline);
+});
+
+test("one-game series ends as a recorded draw instead of starting another game", async () => {
+  const match = {
+    ...makeMatch({ firstDeadline: 60_000, secondDeadline: 60_000 }),
+    status: "active",
+    seriesNumber: 1,
+    seriesTarget: 1,
+    gameNumber: 1,
+    wins: { first: 0, second: 0 },
+    seats: [
+      {
+        tokenHash: "first-hash",
+        displayName: "First",
+        connected: true,
+        reconnectRemainingMs: 60_000,
+        disconnectedAt: null,
+      },
+      {
+        tokenHash: "second-hash",
+        displayName: "Second",
+        connected: true,
+        reconnectRemainingMs: 60_000,
+        disconnectedAt: null,
+      },
+    ],
+  };
+  const { object, values } = makeObject(match);
+
+  await atTime(now, async () => {
+    object.applyGameOutcome(match, "draw");
+    await object.publish(match);
+  });
+
+  const result = values.get("match");
+  assert.equal(result.status, "completed");
+  assert.equal(result.outcome, "series-draw");
+  assert.equal(result.seriesWinner, null);
+  assert.deepEqual(result.wins, { first: 0, second: 0 });
+  assert.equal(result.nextGameDeadline, null);
+  assert.deepEqual(
+    result.historyOutbox[0].payload.players.map((player) => player.result),
+    ["draw", "draw"],
+  );
+});
+
+test("best-of-three ends at its game cap and awards the higher series score", async () => {
+  const match = {
+    ...makeMatch({ firstDeadline: 60_000, secondDeadline: 60_000 }),
+    status: "active",
+    seriesNumber: 1,
+    seriesTarget: 2,
+    gameNumber: 3,
+    wins: { first: 1, second: 0 },
+  };
+  const { object } = makeObject(match);
+
+  await atTime(now, async () => object.applyGameOutcome(match, "draw"));
+
+  assert.equal(match.status, "completed");
+  assert.equal(match.outcome, "series-decided-on-wins");
+  assert.equal(match.seriesWinner, "first");
+  assert.deepEqual(match.wins, { first: 1, second: 0 });
+});
+
+test("legacy tied intermission at the new game cap closes as a draw", async () => {
+  const match = {
+    ...makeMatch({ firstDeadline: 60_000, secondDeadline: 60_000 }),
+    seriesTarget: 1,
+    gameNumber: 1,
+    wins: { first: 0, second: 0 },
+  };
+  const { object, values } = makeObject(match);
+
+  const normalized = await object.load(false);
+
+  assert.equal(normalized.status, "completed");
+  assert.equal(normalized.outcome, "series-draw");
+  assert.equal(values.get("match").status, "completed");
+  assert.equal(values.get("match").seriesWinner, null);
 });
 
 test("a due public fallback fills the open seat and uses the normal ready countdown", async () => {

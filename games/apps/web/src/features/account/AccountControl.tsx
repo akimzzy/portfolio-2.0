@@ -17,6 +17,7 @@ import {
   historyFinishReasonLabel,
   historyGameTitle,
   historyRankingLabel,
+  historyResultLabel,
 } from "./history-presentation";
 
 const accountDate = new Intl.DateTimeFormat(undefined, { dateStyle: "medium" });
@@ -572,10 +573,8 @@ export function AccountControl({
                           const cardContent = (
                             <>
                               <div className="account-history-card-heading">
-                                <strong
-                                  className={`account-history-outcome ${entry.result === "win" ? "is-win" : "is-loss"}`}
-                                >
-                                  {entry.result === "win" ? "Won" : "Lost"}
+                                <strong className={`account-history-outcome is-${entry.result}`}>
+                                  {historyResultLabel(entry.result)}
                                 </strong>
                                 <span className="account-history-game-name">{gameName}</span>
                                 {entry.record_source === "guest_import" && (
@@ -659,7 +658,7 @@ export function AccountControl({
                                 <button
                                   className="account-history-card"
                                   type="button"
-                                  aria-label={`${entry.result === "win" ? "Won" : "Lost"} ${gameName} against ${entry.opponent_name}, score ${entry.wins} to ${entry.losses}. ${isExpanded ? "Hide" : "View"} game boards`}
+                                  aria-label={`${historyResultLabel(entry.result)} ${gameName} against ${entry.opponent_name}, score ${entry.wins} to ${entry.losses}. ${isExpanded ? "Hide" : "View"} game boards`}
                                   aria-busy={historyOpeningId === entry.completion_id || undefined}
                                   aria-expanded={isExpanded}
                                   aria-controls={detailsId}

@@ -68,6 +68,22 @@ test("guest history upserts by completed series and removes only imported record
   });
 });
 
+test("guest history stores capped series draws without assigning a win or loss", async () => {
+  await withStorage(() => {
+    assert.equal(
+      saveGuestHistory(
+        entry("abcdefghijklmnopqrstuv:1", "2026-11-16T12:00:00.000Z", {
+          result: "draw",
+          wins: 1,
+          losses: 1,
+        }),
+      ),
+      true,
+    );
+    assert.equal(readGuestHistory()[0]?.result, "draw");
+  });
+});
+
 test("guest history rejects malformed records and bounds the device archive", async () => {
   await withStorage(async (values) => {
     assert.equal(saveGuestHistory(entry("not-a-completion-id")), false);
