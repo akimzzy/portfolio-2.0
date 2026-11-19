@@ -116,7 +116,7 @@ Private orders and authenticated admin responses stay out of shared public cache
 
 ## What using the store revealed
 
-The store is now using [Alluring Aura Scent](https://alluringaurascent.com/). When a customer places an order, the admin receives an email with a link to manage it. Orders can be marked as shipped or ready for pickup, depending on the fulfilment method. I explain the delivery and recovery choices in [sending order emails with Resend](/writing/reliable-order-emails-resend).
+The store is now using [Alluring Aura Scent](https://alluring-aura-scent.a-akeem.workers.dev/). When a customer places an order, the admin receives an email with a link to manage it. Orders can be marked as shipped or ready for pickup, depending on the fulfilment method. I explain the delivery and recovery choices in [sending order emails with Resend](/writing/reliable-order-emails-resend).
 
 One request after launch was for notifications from the installed PWA. Emails can be overlooked, and the admin wanted order alerts to appear like notifications from the business app on their phone. That feature is not yet available.
 

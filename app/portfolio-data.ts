@@ -58,7 +58,7 @@ export const projects: Entry[] = [
     summary: "I built the storefront and admin app for a perfume store, with Paystack payment verification, stock allocation in database transactions, and order management.",
     description: "Customers can browse and search for perfumes, check out without an account, choose delivery or pickup, and track their orders. I built the storefront for mobile screens.\n\nStore staff can manage products, import spreadsheets, and fulfil orders through the admin app. Online and walk-in sales use the same inventory. I verify Paystack payments on the server and allocate stock in database transactions, including checks for bundles and shortages.\n\nThe app uses Next.js, React, TypeScript, Tailwind CSS, PostgreSQL, and Drizzle. It runs on Cloudflare Workers, with product images in R2 and order emails sent through Resend.",
     tags: ["Next.js", "TypeScript", "PostgreSQL", "Cloudflare", "Paystack"],
-    live: "https://alluringaurascent.com/",
+    live: "https://alluring-aura-scent.a-akeem.workers.dev/",
   },
   {
     id: "quikcity", title: "QuikCity", subtitle: "Founder & product lead",

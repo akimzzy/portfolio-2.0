@@ -44,7 +44,7 @@ assert.equal(structured.mainEntityOfPage, metadata.alternates.canonical);
 assert.equal(structured.image[0], metadata.openGraph.images[0].url);
 const rendered = renderToStaticMarkup(createElement(ArticleBody, { content: draft.content }));
 assert.match(rendered, /<h2>Hosting the Next.js app/);
-assert.match(rendered, /href="https:\/\/alluringaurascent.com\/"/);
+assert.match(rendered, /href="https:\/\/alluring-aura-scent\.a-akeem\.workers\.dev\/"/);
 assert.doesNotMatch(rendered, /<h1>/, 'The page owns the single article h1');
 const unsafe = renderToStaticMarkup(createElement(ArticleBody, { content: '<script>alert(1)</script>\n\n[bad](javascript:alert)' }));
 assert.doesNotMatch(unsafe, /<script|href="javascript:/);

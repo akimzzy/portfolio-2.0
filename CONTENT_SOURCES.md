@@ -44,7 +44,7 @@ The owner may supply additional recent projects, project screenshots, and furthe
 
 ## Alluring Aura Scent
 
-The owner confirmed this project was completed and requested its inclusion. Its public domain, [alluringaurascent.com](https://alluringaurascent.com/), was verified in a browser and matches the brand and deployment configuration in `/Users/akeem/projects/alluring-aura-scent`.
+The owner confirmed this project was completed and requested its inclusion. The current staging deployment is [alluring-aura-scent.a-akeem.workers.dev](https://alluring-aura-scent.a-akeem.workers.dev/); it matches the brand and deployment configuration in `/Users/akeem/projects/alluring-aura-scent`.
 
 The portfolio description is grounded in that project's README, package manifest, screen map, payment service, inventory allocation, import contracts, and notification scheduler. These support the storefront/admin scope, guest checkout, tracking, online/walk-in stock handling, bundle allocation, spreadsheet imports, server-side payment verification, and the stated technology stack. No customer counts, sales figures, performance benchmarks, private repository links, or screenshots were invented.
 
